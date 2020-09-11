@@ -1,0 +1,53 @@
+#!/usr/bin/env python3.8
+import os, urllib.request, json, fileinput, re, subprocess
+## Define vars and checks.
+srv_endpoint = 'https://photoslibrary.googleapis.com/v1/'
+api_key = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
+oauth2_file_path = 'storage-photos.json'
+dp_pth = 'db.sqlite'
+if not 'api_key' in globals():
+    print(f"api_key - does not exits!")
+    exit()
+if not os.path.exists(oauth2_file_path):
+    print(f"File {oauth2_file_path} does not exist!")
+    exit()
+if not os.path.exists(dp_pth):
+    print(f"File {dp_pth} does not exist!")
+    exit()
+with open(oauth2_file_path) as oauth2_file:
+    oauth2_file_data = json.load(oauth2_file)
+    access_token = oauth2_file_data['access_token']
+    client_id = oauth2_file_data['client_id']
+    client_secret = oauth2_file_data['client_secret']
+    refresh_token = oauth2_file_data['refresh_token']
+
+#token = {'Bearer ' access_token}
+#print(access_token)
+
+headers = {'Accept': 'application/json',
+           'Authorization': "Bearer {access_token}"}
+
+#print(headers)
+
+def refr_token():
+    url = 'https://accounts.google.com/o/oauth2/token'
+    values = {'client_id': client_id,
+              'client_secret': client_secret,
+              'refresh_token': refresh_token,
+              'grant_type': 'refresh_token'}
+    data = urllib.parse.urlencode(values)
+    #print(data); exit()
+    data = data.encode('ascii')
+    req = urllib.request.Request(url, data)
+    with urllib.request.urlopen(req) as response:
+        the_page = response.read()
+        #print(the_page)
+        new_access_token = json.loads(the_page)['access_token']
+        print(f"New access_token {new_access_token} has been received.")
+    for line in fileinput.input(oauth2_file_path, inplace=True):
+        print (line.replace(access_token, new_access_token)),
+
+#refr_token()
+
+#subprocess.call(["sed -Ei 's/\"access_token\": \"\S*\"/\"access_token\": \"test2\"/'", oauth2_file_path], shell=True)
+
