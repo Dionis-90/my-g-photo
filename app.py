@@ -1,10 +1,26 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3.7
+
 import os, urllib.request, json, fileinput, re, subprocess
-## Define vars and checks.
+from googleapiclient import discovery
+from httplib2 import Http
+from oauth2client import file, client, tools
+
+## Define vars and checks
 srv_endpoint = 'https://photoslibrary.googleapis.com/v1/'
 api_key = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
 oauth2_file_path = 'storage-photos.json'
+identity_file_pth = 'client_id.json'
 dp_pth = 'db.sqlite'
+scopes = 'https://www.googleapis.com/auth/photoslibrary'
+
+## AUTH
+store = file.Storage(oauth2_file_path)
+creds = store.get()
+if not creds or creds.invalid:
+    flow = client.flow_from_clientsecrets(identity_file_pth, scopes)
+    creds = tools.run_flow(flow, store)
+
+## Checks
 if not 'api_key' in globals():
     print(f"api_key - does not exits!")
     exit()
@@ -27,8 +43,6 @@ with open(oauth2_file_path) as oauth2_file:
 headers = {'Accept': 'application/json',
            'Authorization': "Bearer {access_token}"}
 
-#print(headers)
-
 def refr_token():
     url = 'https://accounts.google.com/o/oauth2/token'
     values = {'client_id': client_id,
@@ -48,6 +62,4 @@ def refr_token():
         print (line.replace(access_token, new_access_token)),
 
 #refr_token()
-
-#subprocess.call(["sed -Ei 's/\"access_token\": \"\S*\"/\"access_token\": \"test2\"/'", oauth2_file_path], shell=True)
 
