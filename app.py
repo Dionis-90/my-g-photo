@@ -1,8 +1,13 @@
 #!/usr/bin/env python3.7
 
-import os, urllib.request, urllib.parse, json, fileinput, sqlite3
-from googleapiclient import discovery
-from httplib2 import Http
+import fileinput
+import json
+import os
+import sqlite3
+import urllib.parse
+import urllib.request
+import requests
+
 from oauth2client import file, client, tools
 
 ## Define vars and checks
@@ -35,10 +40,6 @@ with open(oauth2_file_path) as oauth2_file:
     client_secret = oauth2_file_data['client_secret']
     refresh_token = oauth2_file_data['refresh_token']
 
-#token = {'Bearer ' access_token}
-#print(access_token)
-
-
 
 def refr_token() -> str:
     url = 'https://accounts.google.com/o/oauth2/token'
@@ -64,17 +65,21 @@ def refr_token() -> str:
 
 def list_media_obj():
     next_page_token = ''
+    url = srv_endpoint+'mediaItems'
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + access_token,
-               'key': api_key, 
-               'pageSize': '10',
-               'pageToken': next_page_token}
-    #print(headers); exit()
-    #req = urllib.request.Request(srv_endpoint, data=None, headers)
-    #with urllib.request.urlopen(req) as response:
-        #json_resp = response.read()
-    #print(json_resp)
-    urllib.request.urlopen({srv_endpoint}, data=bytes(json.dumps(headers)), encoding="utf-8")
-
+               'Authorization': 'Bearer ' + access_token}
+    params = {'key': api_key,
+              'pageSize': '10',
+              'pageToken': next_page_token}
+    r = requests.get(url, params=params, headers=headers)
+    #print(r.url)
+    print(r.text)
+    if r.status_code == 401:
+        print('Refreshing token.')
+        refr_token()
+    the_page = r.text
+    next_page_token = json.loads(the_page)['nextPageToken']
+    #print(next_page_token)
+    return next_page_token
 
 list_media_obj()
