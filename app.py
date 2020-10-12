@@ -61,10 +61,9 @@ def refr_token() -> str:
     return new_access_token
 
 
-#refr_token()
+# refr_token()
 
-def list_media_obj():
-    next_page_token = ''
+def list_media_obj(next_page_token) -> str:
     url = srv_endpoint+'mediaItems'
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + access_token}
@@ -72,14 +71,31 @@ def list_media_obj():
               'pageSize': '10',
               'pageToken': next_page_token}
     r = requests.get(url, params=params, headers=headers)
-    #print(r.url)
-    print(r.text)
     if r.status_code == 401:
         print('Refreshing token.')
         refr_token()
+        exit()
     the_page = r.text
     next_page_token = json.loads(the_page)['nextPageToken']
-    #print(next_page_token)
+    media_items = json.loads(the_page)['mediaItems']
+    c = dbconn.cursor()
+    for item in media_items:
+        item_id = (item['id'], )
+        filename = item['filename']
+        c.execute('SELECT filename FROM my_media WHERE object_id=?', item_id)
+        print(c.fetchall())
+        if c.fetchone() is not None:
+            print(f'{filename} already exist.')
+            return('10')
+        values = (item['id'], item['filename'], item['mimeType'])
+        c.execute('INSERT INTO my_media (object_id, filename, media_type) VALUES (?, ?, ?)', values)
+        # print( item['id'], item['filename'], item['mimeType'])
+        dbconn.commit()
+    dbconn.close()
+    # print(file_id)
+    # print(next_page_token)
     return next_page_token
 
-list_media_obj()
+next_page_token = list_media_obj('')
+# print(next_page_token)
+# list_media_obj(next_page_token)
