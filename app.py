@@ -82,14 +82,18 @@ def list_media_obj(next_page_token) -> str:
     for item in media_items:
         item_id = (item['id'], )
         filename = item['filename']
-        c.execute('SELECT filename FROM my_media WHERE object_id=?', item_id)
-        print(c.fetchall())
-        if c.fetchone() is not None:
-            print(f'{filename} already exist.')
-            return('10')
+        # c.execute('SELECT filename FROM my_media WHERE object_id=?', item_id)
         values = (item['id'], item['filename'], item['mimeType'])
-        c.execute('INSERT INTO my_media (object_id, filename, media_type) VALUES (?, ?, ?)', values)
-        # print( item['id'], item['filename'], item['mimeType'])
+        try:
+            c.execute('INSERT INTO my_media (object_id, filename, media_type) VALUES (?, ?, ?)', values)
+        except sqlite3.IntegrityError:
+            print(f'{filename} already exist.')
+            dbconn.close()
+            return('10')
+        except Exception:
+            print('Unexpected error.')
+            dbconn.close()
+            return('20')
         dbconn.commit()
     dbconn.close()
     # print(file_id)
