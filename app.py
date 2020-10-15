@@ -6,8 +6,6 @@ import os
 import requests
 import sqlite3
 import time
-import urllib.parse
-import urllib.request
 from oauth2client import file, client, tools
 
 # Define global vars
@@ -83,11 +81,9 @@ def list_media_obj(next_page_token):
             c.execute('INSERT INTO my_media (object_id, filename, media_type) VALUES (?, ?, ?)', values)
         except sqlite3.IntegrityError:
             print(f'{filename} already exist.')
-            dbconn.close()
             return 10
         except Exception:
             print('Unexpected error.')
-            dbconn.close()
             return 20
         dbconn.commit()
     return new_next_page_token
