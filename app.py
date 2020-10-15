@@ -51,14 +51,9 @@ def refr_token():
               'client_secret': client_secret,
               'refresh_token': refresh_token,
               'grant_type': 'refresh_token'}
-    data = urllib.parse.urlencode(values)
-    data = data.encode('ascii')
-    req = urllib.request.Request(url, data)
-    with urllib.request.urlopen(req) as response:
-        the_page = response.read()
-        #print(the_page)
-        new_access_token = json.loads(the_page)['access_token']
-        #print(f"New access_token {new_access_token} has been received.")
+    r = requests.post(url, data = values)
+    the_page = r.text
+    new_access_token = json.loads(the_page)['access_token']
     for line in fileinput.input(oauth2_file_path, inplace=True):
         print (line.replace(access_token, new_access_token)),
     return new_access_token
