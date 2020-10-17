@@ -27,6 +27,8 @@ if not creds or creds.invalid:
 if not os.path.exists(oauth2_file_path):
     print(f"File {oauth2_file_path} does not exist!")
     exit()
+
+
 def read_creds():
     global access_token
     global client_id
@@ -43,17 +45,18 @@ def read_creds():
 
 read_creds()
 
+
 def refr_token():
     url = 'https://accounts.google.com/o/oauth2/token'
     values = {'client_id': client_id,
               'client_secret': client_secret,
               'refresh_token': refresh_token,
               'grant_type': 'refresh_token'}
-    r = requests.post(url, data = values)
+    r = requests.post(url, data=values)
     the_page = r.text
     new_access_token = json.loads(the_page)['access_token']
     for line in fileinput.input(oauth2_file_path, inplace=True):
-        print (line.replace(access_token, new_access_token)),
+        print(line.replace(access_token, new_access_token)),
     return new_access_token
 
 
@@ -96,4 +99,3 @@ while type(list_media_obj_result) == str:
     list_media_obj_result = list_media_obj(list_media_obj_result)
     time.sleep(2)
 dbconn.close()
-
