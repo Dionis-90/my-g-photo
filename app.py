@@ -54,6 +54,15 @@ def refr_token():
 
 
 def list_media_obj(next_page_token):
+    """
+    Gets list of media objects and put metadata to database.
+    :param next_page_token: We receive this token in response after successful execution of this function.
+        First we need to set an empty string.
+    :return: next_page_token or exit codes:
+        10 - media object metadata already exists in database.
+        20 - unknown error.
+        30 - token expired and has been refreshed.
+    """
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + credentials['access_token']}
@@ -64,7 +73,6 @@ def list_media_obj(next_page_token):
     if r.status_code == 401:
         print('Refreshing token.')
         refr_token()
-        # read_creds()
         return 30
     the_page = r.text
     new_next_page_token = json.loads(the_page)['nextPageToken']
