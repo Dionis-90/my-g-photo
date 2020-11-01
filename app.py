@@ -57,7 +57,7 @@ def list_media_obj(next_page_token):
     """
     Gets list of media objects and put metadata to database.
     :param next_page_token: We receive this token in response after successful execution of this function.
-        First we need to set an empty string.
+        At the first run we need to set an empty string.
     :return: next_page_token or exit codes:
         10 - media object metadata already exists in database.
         20 - unknown error.
