@@ -106,6 +106,7 @@ def get_media_files(baseurl, filename):
     return 0
 
 
+# Get list of media and write info into the DB.
 db_connect = sqlite3.connect(DB_FILE_PATH)
 list_media_obj_result = list_media_obj('')
 if list_media_obj_result == 30:
