@@ -52,6 +52,10 @@ def refr_token():
         print(line.replace(credentials['access_token'], new_access_token)),
     return new_access_token
 
+# TODO
+"""
+baseUrl make is temporary url, please do not store it
+"""
 
 def list_media_obj(next_page_token):
     """
@@ -82,7 +86,8 @@ def list_media_obj(next_page_token):
         filename = item['filename']
         values = (item['id'], item['filename'], item['mimeType'], item['baseUrl'])
         try:
-            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, baseurl) VALUES (?, ?, ?, ?)', values)
+            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, baseurl) \
+            VALUES (?, ?, ?, ?)', values)
         except sqlite3.IntegrityError:
             print(f'{filename} already exist.')
             return 10
@@ -93,16 +98,19 @@ def list_media_obj(next_page_token):
     return new_next_page_token
 
 
-def get_media_files(baseurl, filename):
-#    cur_db_connection = db_connect.cursor()
-#    cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE loaded != '1'")
-#    print(cur_db_connection.fetchall())
-    url = baseurl+'=d'
-    r = requests.get(url, params=None, headers=None)
-    the_page = r.content
-    f = open('media/'+filename, 'wb')
-    f.write(the_page)
-    f.close()
+def get_media_files():
+    cur_db_connection = db_connect.cursor()
+    cur_db_connection.execute("SELECT baseurl, filename FROM my_media WHERE loaded != '1'")
+    selection = cur_db_connection.fetchall()
+    for item in selection:
+        r = requests.get(item[0]+'=d', params=None, headers=None)
+        binary_data = r.content
+        f = open('media/'+item[1], 'wb')
+        f.write(binary_data)
+        f.close()
+        cur_db_connection.execute("UPDATE my_media SET loaded='1' WHERE baseurl=?", (item[0],))
+        db_connect.commit()
+        time.sleep(2)
     return 0
 
 
@@ -115,5 +123,5 @@ if list_media_obj_result == 30:
 while type(list_media_obj_result) == str:
     list_media_obj_result = list_media_obj(list_media_obj_result)
     time.sleep(2)
-# get_media_files('https://lh3.googleusercontent.com/lr/AFBm1_ZO1KNgsScG2lgZlOygL0Yv8pTp3834ox4vhmXqj93A2U7oZRvQQMb-41qn6027q6XH8s1IUc6_xuUFoHf7R9qyFUnn662q0_jfBfSS8fVJdnad2_4TrGlnm_-ZU8CtRLik55nDI_A35Bew-GJhkdpIs4KlX_1SuNQr6LciR5gBA6DFOkkRXkT9eMzbd6R8a89rWcxKDu5rMrrizUgH1J-tPt1-owxe43hPy5R1c94AgMkMcI7QvMTYIUOvPqaHYFcsBeFpP-rXShUFWJtdcuueONOyEEjYRc7AOzvc8ktsicfe4JMDOu-DBp70DPuz70PuSBE8lDH_upqV3bXH2cH3UjSq7iN6uXouhHEvxJemQjlhNLyJIeA5JX_mcNBgvROXZF7QhdwXrBw7jTjDnCL1F4uN2BiJ8MhZW0SBMvQlON1mPyG1iEEj5eXITHG6wVo0liPT39YlRKnwn5N0RUo4UcZH7Uyf-kkpJfb3Zc04xeuW0d45YpYLtuK0t-dnAJUk0T10vvs9ITlCUpBClf82etCUfPnFTVO7LpblH9cSutvzzlO-pmC8DCCdmPxxuWWTvckDAJvEU-aM1cJRRO_W4DqE8Yfl5nSty7JELBth9-8IXGM3drnBvFuVSxjjN_ji4nRupF5ZNm0krnK92FVUe7pC6czgbMTJ2KoyHPiv3zz_x1DisioTGC0ygIHBwBTe3J5Wf_CZCVnUtTsom6sOF8luyix1CqSE12d9jnf2KqU7dujt8qHMLZs5CaZpt-_8r0YzaTgJX9cSWmsvpD1pcdvtg6pX4azlkNTiwlu2KlDNpbgJqpv0', 'file.jpg')
+get_media_files()
 db_connect.close()
