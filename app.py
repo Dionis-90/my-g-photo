@@ -52,10 +52,6 @@ def refr_token():
         print(line.replace(credentials['access_token'], new_access_token)),
     return new_access_token
 
-# TODO
-"""
-baseUrl make is temporary url, please do not store it
-"""
 
 def list_media_obj(next_page_token):
     """
@@ -83,13 +79,12 @@ def list_media_obj(next_page_token):
     media_items = json.loads(the_page)['mediaItems']
     cur_db_connection = db_connect.cursor()
     for item in media_items:
-        filename = item['filename']
-        values = (item['id'], item['filename'], item['mimeType'], item['baseUrl'])
+        values = (item['id'], item['filename'], item['mimeType'])
         try:
-            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, baseurl) \
-            VALUES (?, ?, ?, ?)', values)
+            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type) \
+            VALUES (?, ?, ?)', values)
         except sqlite3.IntegrityError:
-            print(f'{filename} already exist.')
+            print('List has been retrieved.')
             return 10
         except Exception:
             print('Unexpected error.')
@@ -100,15 +95,30 @@ def list_media_obj(next_page_token):
 
 def get_media_files():
     cur_db_connection = db_connect.cursor()
-    cur_db_connection.execute("SELECT baseurl, filename FROM my_media WHERE loaded != '1'")
+    cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE loaded != '1'")
     selection = cur_db_connection.fetchall()
+    headers = {'Accept': 'application/json',
+               'Authorization': 'Bearer ' + credentials['access_token']}
+    params = {'key': API_KEY}
     for item in selection:
-        r = requests.get(item[0]+'=d', params=None, headers=None)
-        binary_data = r.content
+        r = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
+        base_url = json.loads(r.text)['baseUrl']
+        if 'image' in item[2]:
+            r = requests.get(base_url+'=d', params=None, headers=None)
+        elif 'video' in item[2]:
+            print('Video')
+            r = requests.get(base_url+'=dv', params=None, headers=None)
+        else:
+            print('Unexpected error.')
+            return 1
+        if 'text/html' in r.headers['Content-Type']:
+            print(r.text)
+            return 2
         f = open('media/'+item[1], 'wb')
-        f.write(binary_data)
+        f.write(r.content)
         f.close()
-        cur_db_connection.execute("UPDATE my_media SET loaded='1' WHERE baseurl=?", (item[0],))
+        print(f'{item[1]} - stored.')
+        cur_db_connection.execute("UPDATE my_media SET loaded='1' WHERE object_id=?", (item[0],))
         db_connect.commit()
         time.sleep(2)
     return 0
@@ -125,3 +135,4 @@ while type(list_media_obj_result) == str:
     time.sleep(2)
 get_media_files()
 db_connect.close()
+print('Done.')
