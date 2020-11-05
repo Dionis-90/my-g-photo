@@ -100,23 +100,28 @@ def get_media_files():
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + credentials['access_token']}
     params = {'key': API_KEY}
+
     for item in selection:
         r = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
         base_url = json.loads(r.text)['baseUrl']
         if 'image' in item[2]:
             r = requests.get(base_url+'=d', params=None, headers=None)
         elif 'video' in item[2]:
-            print('Video')
             r = requests.get(base_url+'=dv', params=None, headers=None)
         else:
             print('Unexpected error.')
             return 1
+
         if 'text/html' in r.headers['Content-Type']:
             print(r.text)
             return 2
-        f = open('media/'+item[1], 'wb')
-        f.write(r.content)
-        f.close()
+        elif 'image' in r.headers['Content-Type'] or 'video' in r.headers['Content-Type']:
+            f = open('media/'+item[1], 'wb')
+            f.write(r.content)
+            f.close()
+        else:
+            print('Unexpected error.')
+            return 3
         print(f'{item[1]} - stored.')
         cur_db_connection.execute("UPDATE my_media SET loaded='1' WHERE object_id=?", (item[0],))
         db_connect.commit()
@@ -133,6 +138,7 @@ if list_media_obj_result == 30:
 while type(list_media_obj_result) == str:
     list_media_obj_result = list_media_obj(list_media_obj_result)
     time.sleep(2)
+# Download media files to media folder.
 get_media_files()
 db_connect.close()
 print('Done.')
