@@ -53,7 +53,7 @@ def refr_token():
     return new_access_token
 
 
-def list_media_obj(next_page_token):
+def get_list_one_page(next_page_token):
     """
     Gets list of media objects and put metadata to database.
     :param next_page_token: We receive this token in response after successful execution of this function.
@@ -94,6 +94,12 @@ def list_media_obj(next_page_token):
 
 
 def get_media_files():
+    """
+    Downloads media files to media folder and marks 1 in 'loaded' field.
+    :return:
+        0 - success
+        1 or 2 or 3 - unexpected error.
+    """
     cur_db_connection = db_connect.cursor()
     cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE loaded != '1'")
     selection = cur_db_connection.fetchall()
@@ -131,12 +137,12 @@ def get_media_files():
 
 # Get list of media and write info into the DB.
 db_connect = sqlite3.connect(DB_FILE_PATH)
-list_media_obj_result = list_media_obj('')
-if list_media_obj_result == 30:
+result = get_list_one_page('')
+if result == 30:
     credentials = read_credentials()
-    list_media_obj_result = list_media_obj('')
-while type(list_media_obj_result) == str:
-    list_media_obj_result = list_media_obj(list_media_obj_result)
+    result = get_list_one_page('')
+while type(result) == str:
+    result = get_list_one_page(result)
     time.sleep(2)
 # Download media files to media folder.
 get_media_files()
