@@ -18,8 +18,8 @@ DB_FILE_PATH = 'db.sqlite'
 SCOPES = 'https://www.googleapis.com/auth/photoslibrary'
 PATH_TO_MEDIA_STORAGE = 'media/'
 
-logging.basicConfig(format='%(asctime)s %(message)s', filename='working.log', filemode='w', level=logging.INFO)
-
+logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
+                    filename='working.log', filemode='a', level=logging.INFO)
 logging.info('Started.')
 
 if not os.path.exists(IDENTITY_FILE_PATH):
@@ -41,7 +41,7 @@ if not os.path.exists(OAUTH2_FILE_PATH):
     exit(1)
 
 
-def read_credentials():
+def read_credentials() -> json:
     with open(OAUTH2_FILE_PATH) as oauth2_file:
         oauth2_file_data = json.load(oauth2_file)
         return oauth2_file_data
@@ -60,31 +60,46 @@ def refr_token():
     for line in fileinput.input(OAUTH2_FILE_PATH, inplace=True):
         print(line.replace(credentials['access_token'], new_access_token)),
     logging.info('Token has been refreshed.')
-    return new_access_token
+    return 0
 
 
-def get_list_one_page(next_page_token):
+def get_list_one_page(next_page_token) -> tuple:
     """
     Gets list of media objects and put metadata to database.
     :param next_page_token: We receive this token in response after successful execution of this function.
-        At the first run we need to set an empty string.
-    :return: next_page_token or exit codes:
+        At the first run we need to set this as None.
+    :return: (exit_code, next_page_token):
+        0 - got page of list successfully.
         10 - media object metadata already exists in database.
-        20 - unknown error.
-        30 - token expired and has been refreshed.
+        21 - not http 200 code when trying to get page of list.
+        22 - No mediaItems object in response.
+        23 - No nextPageToken object in response.
+        30 - http 401 code, the token may have expired.
     """
+    objects_count_on_page = '100'
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + credentials['access_token']}
     params = {'key': API_KEY,
-              'pageSize': '10',
+              'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
     r = requests.get(url, params=params, headers=headers)
     if r.status_code == 401:
-        refr_token()
-        return 30
-    new_next_page_token = json.loads(r.text)['nextPageToken']
-    media_items = json.loads(r.text)['mediaItems']
+        return 30, next_page_token
+    elif r.status_code != 200:
+        logging.warning(f"http code {r.status_code} when trying to get page of list with next_page_token: \
+                        {next_page_token}, response: {r.text}")
+        return 21, next_page_token
+    try:
+        media_items = json.loads(r.text)['mediaItems']
+    except KeyError:
+        logging.warning(f"No mediaItems object in response. Response: {r.text}")
+        return 22, next_page_token
+    try:
+        new_next_page_token = json.loads(r.text)['nextPageToken']
+    except KeyError:
+        logging.warning(f"No nextPageToken object in response. Probably end of the list. Response: {r.text}")
+        new_next_page_token = None
     cur_db_connection = db_connect.cursor()
     for item in media_items:
         values = (item['id'], item['filename'], item['mimeType'])
@@ -93,23 +108,22 @@ def get_list_one_page(next_page_token):
             VALUES (?, ?, ?)', values)
         except sqlite3.IntegrityError:
             logging.info('List has been retrieved.')
-            return 10
-        except Exception:
-            logging.error('Unexpected error.')
-            return 20
+            return 10, new_next_page_token
         db_connect.commit()
-    return new_next_page_token
+    return 0, new_next_page_token
 
 
 def get_media_files():
     """
     Downloads media files to media folder and marks 1 in 'loaded' field.
+    If file already exist, marks it 2 in 'loaded' field.
     :return:
-        0 - success
+        0 - success.
         1 or 2 or 3 - unexpected error.
+        4 - http 401 code, the token may have expired.
     """
     cur_db_connection = db_connect.cursor()
-    cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE loaded != '1'")
+    cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE loaded = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + credentials['access_token']}
@@ -117,6 +131,8 @@ def get_media_files():
 
     for item in selection:
         r = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
+        if r.status_code == 401:
+            return 4
         base_url = json.loads(r.text)['baseUrl']
         if 'image' in item[2]:
             r = requests.get(base_url+'=d', params=None, headers=None)
@@ -125,11 +141,15 @@ def get_media_files():
         else:
             logging.error('Unexpected error.')
             return 1
-
         if 'text/html' in r.headers['Content-Type']:
-            logging.warning(r.text)
+            logging.error(f"Unexpected error: {r.text}")
             return 2
         elif 'image' in r.headers['Content-Type'] or 'video' in r.headers['Content-Type']:
+            if os.path.exists(PATH_TO_MEDIA_STORAGE+item[1]):
+                logging.warning(f"File {item[1]} already exist in local storage! Setting 'loaded = 2' in database.")
+                cur_db_connection.execute("UPDATE my_media SET loaded='2' WHERE object_id=?", (item[0],))
+                db_connect.commit()
+                continue
             f = open(PATH_TO_MEDIA_STORAGE+item[1], 'wb')
             f.write(r.content)
             f.close()
@@ -145,14 +165,29 @@ def get_media_files():
 
 # Get list of media and write info into the DB.
 db_connect = sqlite3.connect(DB_FILE_PATH)
-result = get_list_one_page('')
-if result == 30:
-    credentials = read_credentials()
-    result = get_list_one_page('')
-while type(result) == str:
-    result = get_list_one_page(result)
-    time.sleep(2)
+logging.info('Start retrieving a list of media items.')
+result = (0, None)
+while True:
+    result = get_list_one_page(result[1])
+    time.sleep(5)
+    if result[0] == 30:
+        refr_token()
+        credentials = read_credentials()
+    elif result[0] == 10:
+        break
+    elif result[0] != 0:
+        logging.error(f"Application error on function get_list_one_page. Returns code - {result[0]}.")
+        db_connect.close()
+        exit(1)
+
 # Download media files to media folder.
-get_media_files()
+logging.info('Start downloading a list of media items.')
+#while True:
+#    result = get_media_files()
+#    if result == 4:
+#        refr_token()
+#        credentials = read_credentials()
+#    else:
+#        break
 db_connect.close()
 logging.info('Finished.')
