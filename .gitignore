@@ -1,3 +1,6 @@
 .idea
 venv
-storage-photos.json
+storage.json
+*.log
+*.sqlite
+media/*
