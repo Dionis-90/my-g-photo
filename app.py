@@ -15,6 +15,7 @@ OAUTH2_FILE_PATH = 'storage-photos.json'
 IDENTITY_FILE_PATH = 'client_id.json'
 DB_FILE_PATH = 'db.sqlite'
 SCOPES = 'https://www.googleapis.com/auth/photoslibrary'
+PATH_TO_MEDIA_STORAGE = 'media/'
 
 if not os.path.exists(IDENTITY_FILE_PATH):
     print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
@@ -46,8 +47,7 @@ def refr_token():
               'refresh_token': credentials['refresh_token'],
               'grant_type': 'refresh_token'}
     response = requests.post(credentials['token_uri'], data=values)
-    the_page = response.text
-    new_access_token = json.loads(the_page)['access_token']
+    new_access_token = json.loads(response.text)['access_token']
     for line in fileinput.input(OAUTH2_FILE_PATH, inplace=True):
         print(line.replace(credentials['access_token'], new_access_token)),
     return new_access_token
@@ -122,7 +122,7 @@ def get_media_files():
             print(r.text)
             return 2
         elif 'image' in r.headers['Content-Type'] or 'video' in r.headers['Content-Type']:
-            f = open('media/'+item[1], 'wb')
+            f = open(PATH_TO_MEDIA_STORAGE+item[1], 'wb')
             f.write(r.content)
             f.close()
         else:
