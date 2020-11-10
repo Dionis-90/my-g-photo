@@ -9,6 +9,8 @@ import time
 import logging
 from oauth2client import file, client, tools
 
+# TODO make auth with googleapiclient
+
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 API_KEY = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
