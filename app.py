@@ -21,36 +21,23 @@ PATH_TO_MEDIA_STORAGE = 'media/'
 # PATH_TO_VIDEO_STORAGE = 'media/'  #TODO
 LOG_FILE_PATH = 'working.log'
 
-logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
-logging.info('Started.')
 
-if not os.path.exists(IDENTITY_FILE_PATH):
-    logging.error(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
-    exit(1)
-
-if not os.path.exists(PATH_TO_MEDIA_STORAGE):
-    logging.error(f"File {PATH_TO_MEDIA_STORAGE} does not exist! Please set correct path.")
-    exit(1)
-
-# AUTH
-store = file.Storage(OAUTH2_FILE_PATH)
-creds = store.get()
-if not creds or creds.invalid:
-    flow = client.flow_from_clientsecrets(IDENTITY_FILE_PATH, SCOPES)
-    creds = tools.run_flow(flow, store)
-if not os.path.exists(OAUTH2_FILE_PATH):
-    logging.error(f"File {OAUTH2_FILE_PATH} does not exist! Authentication unsuccessful.")
-    exit(1)
+def get_auth():
+    store = file.Storage(OAUTH2_FILE_PATH)
+    creds = store.get()
+    if not creds or creds.invalid:
+        flow = client.flow_from_clientsecrets(IDENTITY_FILE_PATH, SCOPES)
+        tools.run_flow(flow, store)
+    if not os.path.exists(OAUTH2_FILE_PATH):
+        print(f"File {OAUTH2_FILE_PATH} does not exist! Authentication unsuccessful.")
+        exit(1)
+    return
 
 
 def read_credentials() -> json:
     with open(OAUTH2_FILE_PATH) as oauth2_file:
         oauth2_file_data = json.load(oauth2_file)
         return oauth2_file_data
-
-
-credentials = read_credentials()
 
 
 def refr_token():
@@ -63,12 +50,12 @@ def refr_token():
     for line in fileinput.input(OAUTH2_FILE_PATH, inplace=True):
         print(line.replace(credentials['access_token'], new_access_token)),
     logging.info('Token has been refreshed.')
-    return 0
+    return
 
 
 def get_list_one_page(next_page_token) -> tuple:
     """
-    Gets list of media objects and put metadata to database.
+    Gets one page of media objects list and puts metadata into the database.
     :param next_page_token: We receive this token in response after successful execution of this function.
         At the first run we need to set this as None.
     :return: (exit_code, next_page_token):
@@ -116,7 +103,7 @@ def get_list_one_page(next_page_token) -> tuple:
     return 0, new_next_page_token
 
 
-def get_media_files():
+def get_media_files() -> int:
     """
     Downloads media files to media folder and marks 1 in 'stored' field.
     If file already exist, marks it 2 in 'stored' field.
@@ -166,9 +153,26 @@ def get_media_files():
     return 0
 
 
-# Get list of media and write info into the DB.
+# Checking required paths.
+if not os.path.exists(IDENTITY_FILE_PATH):
+    print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
+    exit(1)
+if not os.path.exists(PATH_TO_MEDIA_STORAGE):
+    print(f"File {PATH_TO_MEDIA_STORAGE} does not exist! Please set correct path.")
+    exit(1)
+
+get_auth()
+
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
+logging.info('Started.')
+
+credentials = read_credentials()
 db_connect = sqlite3.connect(DB_FILE_PATH)
 logging.info('Start retrieving a list of media items.')
+
+# Get list of media and write info into the DB.
 result = (0, None)
 while True:
     result = get_list_one_page(result[1])
@@ -179,7 +183,7 @@ while True:
     elif result[0] == 10:
         break
     elif result[0] != 0:
-        logging.error(f"Application error on function get_list_one_page. Returns code - {result[0]}.")
+        logging.error(f"Application error. Returns code - {result[0]}.")
         db_connect.close()
         exit(1)
 
