@@ -8,20 +8,14 @@ import sqlite3
 import time
 import logging
 import datetime
+from config import *
 from oauth2client import file, client, tools
 
 # TODO make auth with googleapiclient
 
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
-API_KEY = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
-OAUTH2_FILE_PATH = 'storage.json'
-IDENTITY_FILE_PATH = 'client_id.json'
-DB_FILE_PATH = 'db.sqlite'
 SCOPES = 'https://www.googleapis.com/auth/photoslibrary'
-PATH_TO_IMAGES_STORAGE = 'media/'
-PATH_TO_VIDEOS_STORAGE = 'media/'
-LOG_FILE_PATH = 'working.log'
 
 
 def get_auth():

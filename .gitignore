@@ -4,3 +4,5 @@ storage.json
 *.log
 *.sqlite
 media/*
+__*__
+config.py
