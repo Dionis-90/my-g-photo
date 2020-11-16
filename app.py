@@ -7,6 +7,7 @@ import requests
 import sqlite3
 import time
 import logging
+import datetime
 from oauth2client import file, client, tools
 
 # TODO make auth with googleapiclient
@@ -114,7 +115,7 @@ def get_media_files() -> int:
         4 - http 401 code, the token may have expired.
     """
     cur_db_connection = db_connect.cursor()
-    cur_db_connection.execute("SELECT object_id, filename, media_type FROM my_media WHERE stored = '0'")
+    cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + credentials['access_token']}
@@ -132,7 +133,8 @@ def get_media_files() -> int:
         else:
             logging.error('Unexpected error.')
             return 1
-
+        year_of_item = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
+        subfolder_name = str(year_of_item)+'/'
         if 'text/html' in r.headers['Content-Type']:
             logging.error(f"Unexpected error: {r.text}")
             return 2
@@ -142,7 +144,9 @@ def get_media_files() -> int:
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
                 continue
-            f = open(PATH_TO_IMAGES_STORAGE+item[1], 'wb')
+            if not os.path.exists(PATH_TO_IMAGES_STORAGE+subfolder_name):
+                os.makedirs(PATH_TO_IMAGES_STORAGE+subfolder_name)
+            f = open(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
             f.close()
         elif 'video' in r.headers['Content-Type']:
@@ -151,7 +155,9 @@ def get_media_files() -> int:
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
                 continue
-            f = open(PATH_TO_VIDEOS_STORAGE+item[1], 'wb')
+            if not os.path.exists(PATH_TO_VIDEOS_STORAGE+subfolder_name):
+                os.makedirs(PATH_TO_VIDEOS_STORAGE+subfolder_name)
+            f = open(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
             f.close()
         else:
@@ -160,7 +166,6 @@ def get_media_files() -> int:
         logging.info(f'Item {item[1]} stored.')
         cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (item[0],))
         db_connect.commit()
-        time.sleep(2)
     return 0
 
 
@@ -177,6 +182,10 @@ def add_to_album(album_id, item_id):  # TODO
 
 
 def share_album(album_id):  # TODO
+    pass
+
+
+def create_subfolders_in_storage():  # TODO
     pass
 
 
