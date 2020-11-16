@@ -215,6 +215,8 @@ while True:
         credentials = read_credentials()
     elif result[0] == 10:
         break
+    elif result[0] == 22:
+        logging.warning("Got an empty response from the server. Trying again.")
     elif result[0] != 0:
         logging.error(f"Application error. Returns code - {result[0]}.")
         db_connect.close()
