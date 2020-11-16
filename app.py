@@ -133,7 +133,7 @@ def get_media_files() -> int:
             logging.error(f"Unexpected error: {r.text}")
             return 2
         elif 'image' in r.headers['Content-Type']:
-            if os.path.exists(PATH_TO_IMAGES_STORAGE+item[1]):
+            if os.path.exists(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
@@ -144,7 +144,7 @@ def get_media_files() -> int:
             f.write(r.content)
             f.close()
         elif 'video' in r.headers['Content-Type']:
-            if os.path.exists(PATH_TO_VIDEOS_STORAGE+item[1]):
+            if os.path.exists(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
