@@ -18,9 +18,8 @@ OAUTH2_FILE_PATH = 'storage.json'
 IDENTITY_FILE_PATH = 'client_id.json'
 DB_FILE_PATH = 'db.sqlite'
 SCOPES = 'https://www.googleapis.com/auth/photoslibrary'
-PATH_TO_MEDIA_STORAGE = 'media/'
-# PATH_TO_IMAGES_STORAGE = 'media/'  #TODO
-# PATH_TO_VIDEO_STORAGE = 'media/'  #TODO
+PATH_TO_IMAGES_STORAGE = 'media/'
+PATH_TO_VIDEOS_STORAGE = 'media/'
 LOG_FILE_PATH = 'working.log'
 
 
@@ -133,16 +132,26 @@ def get_media_files() -> int:
         else:
             logging.error('Unexpected error.')
             return 1
+
         if 'text/html' in r.headers['Content-Type']:
             logging.error(f"Unexpected error: {r.text}")
             return 2
-        elif 'image' in r.headers['Content-Type'] or 'video' in r.headers['Content-Type']:
-            if os.path.exists(PATH_TO_MEDIA_STORAGE+item[1]):
+        elif 'image' in r.headers['Content-Type']:
+            if os.path.exists(PATH_TO_IMAGES_STORAGE+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
                 continue
-            f = open(PATH_TO_MEDIA_STORAGE+item[1], 'wb')
+            f = open(PATH_TO_IMAGES_STORAGE+item[1], 'wb')
+            f.write(r.content)
+            f.close()
+        elif 'video' in r.headers['Content-Type']:
+            if os.path.exists(PATH_TO_VIDEOS_STORAGE+item[1]):
+                logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
+                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
+                db_connect.commit()
+                continue
+            f = open(PATH_TO_VIDEOS_STORAGE+item[1], 'wb')
             f.write(r.content)
             f.close()
         else:
@@ -155,12 +164,31 @@ def get_media_files() -> int:
     return 0
 
 
+def list_albums():  # TODO
+    pass
+
+
+def create_album(album_name):  # TODO
+    pass
+
+
+def add_to_album(album_id, item_id):  # TODO
+    pass
+
+
+def share_album(album_id):  # TODO
+    pass
+
+
 # Checking required paths.
 if not os.path.exists(IDENTITY_FILE_PATH):
     print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
     exit(1)
-if not os.path.exists(PATH_TO_MEDIA_STORAGE):
-    print(f"File {PATH_TO_MEDIA_STORAGE} does not exist! Please set correct path.")
+if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
+    print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
+    exit(1)
+if not os.path.exists(PATH_TO_IMAGES_STORAGE):
+    print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
     exit(1)
 
 get_auth()
