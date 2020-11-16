@@ -138,8 +138,6 @@ def get_media_files() -> int:
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
                 continue
-            if not os.path.exists(PATH_TO_IMAGES_STORAGE+subfolder_name):
-                os.makedirs(PATH_TO_IMAGES_STORAGE+subfolder_name)
             f = open(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
             f.close()
@@ -149,8 +147,6 @@ def get_media_files() -> int:
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 db_connect.commit()
                 continue
-            if not os.path.exists(PATH_TO_VIDEOS_STORAGE+subfolder_name):
-                os.makedirs(PATH_TO_VIDEOS_STORAGE+subfolder_name)
             f = open(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
             f.close()
@@ -179,8 +175,21 @@ def share_album(album_id):  # TODO
     pass
 
 
-def create_subfolders_in_storage():  # TODO
-    pass
+def create_subfolders_in_storage():
+    cur_db_connection = db_connect.cursor()
+    cur_db_connection.execute("SELECT creation_time FROM my_media WHERE stored = '0'")
+    selection = cur_db_connection.fetchall()
+    subfolders = set()
+    for item in selection:
+        year = datetime.datetime.strptime(item[0], "%Y-%m-%dT%H:%M:%SZ").year
+        subfolders.add(str(year))
+    for item in subfolders:
+        if not os.path.exists(PATH_TO_IMAGES_STORAGE+item):
+            os.makedirs(PATH_TO_IMAGES_STORAGE+item)
+            logging.info(f"Folder {PATH_TO_IMAGES_STORAGE+item} has been created.")
+        if not os.path.exists(PATH_TO_VIDEOS_STORAGE+item):
+            os.makedirs(PATH_TO_VIDEOS_STORAGE+item)
+            logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
 
 # Checking required paths.
@@ -204,6 +213,10 @@ logging.info('Started.')
 credentials = read_credentials()
 db_connect = sqlite3.connect(DB_FILE_PATH)
 logging.info('Start retrieving a list of media items.')
+
+
+create_subfolders_in_storage()
+
 
 # Get list of media and write info into the DB.
 result = (0, None)
