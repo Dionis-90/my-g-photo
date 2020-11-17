@@ -5,7 +5,6 @@ import json
 import os
 import requests
 import sqlite3
-import time
 import logging
 import datetime
 from config import *
@@ -55,7 +54,7 @@ def get_list_one_page(next_page_token) -> tuple:
     :param next_page_token: We receive this token in response after successful execution of this function.
         At the first run we need to set this as None.
     :return: (exit_code, next_page_token):
-         0 - got page of list successfully.
+         0 - got page of list and nextPageToken successfully.
         10 - media object metadata already exists in database.
         21 - not http 200 code when trying to get page of list.
         22 - No mediaItems object in response.
@@ -69,6 +68,7 @@ def get_list_one_page(next_page_token) -> tuple:
     params = {'key': API_KEY,
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
+    cur_db_connection = db_connect.cursor()
     r = requests.get(url, params=params, headers=headers)
     if r.status_code == 401:
         return 30, next_page_token
@@ -76,26 +76,34 @@ def get_list_one_page(next_page_token) -> tuple:
         logging.warning(f"http code {r.status_code} when trying to get page of list with next_page_token: \
                         {next_page_token}, response: {r.text}")
         return 21, next_page_token
+
     try:
         media_items = json.loads(r.text)['mediaItems']
     except KeyError:
         logging.warning(f"No mediaItems object in response. Response: {r.text}")
         return 22, next_page_token
+
     try:
         new_next_page_token = json.loads(r.text)['nextPageToken']
     except KeyError:
         logging.warning("No nextPageToken object in response. Probably end of the list.")
         new_next_page_token = None
-    cur_db_connection = db_connect.cursor()
+        return 23, new_next_page_token
+
     for item in media_items:
+        objects_already_exists = False
         values = (item['id'], item['filename'], item['mimeType'], item['mediaMetadata']['creationTime'])
         try:
             cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
             VALUES (?, ?, ?, ?)', values)
         except sqlite3.IntegrityError:
-            logging.info('List has been retrieved.')
-            return 10, new_next_page_token
-        db_connect.commit()
+            logging.info(f"Media item {item['filename']} already in the list.")
+            objects_already_exists = True
+            continue
+        finally:
+            db_connect.commit()
+    if objects_already_exists:
+        return 10, new_next_page_token
     return 0, new_next_page_token
 
 
@@ -219,20 +227,32 @@ create_subfolders_in_storage()
 
 
 # Get list of media and write info into the DB.
+c = db_connect.cursor()
+c.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
+db_connect.commit()
 result = (0, None)
 while True:
+    c.execute("SELECT value FROM account_info WHERE key='list_received'")
+    list_received_status = c.fetchone()[0]
     result = get_list_one_page(result[1])
-    time.sleep(5)
     if result[0] == 30:
         refr_token()
         credentials = read_credentials()
     elif result[0] == 10:
+        if list_received_status == '1':
+            logging.warning("List has been retrieved.")
+            break
+    elif result[0] == 22 or result[0] == 23:
+        c.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+        db_connect.commit()
+        logging.warning("List has been retrieved.")
         break
-    elif result[0] == 22:
-        logging.warning("Got an empty response from the server. Trying again.")
     elif result[0] != 0:
         logging.error(f"Application error. Returns code - {result[0]}.")
         db_connect.close()
+        exit(1)
+    else:
+        logging.error("Unexpected error.")
         exit(1)
 
 # Download media files to media folder.
