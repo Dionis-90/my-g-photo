@@ -127,6 +127,11 @@ def get_media_files() -> int:
         r = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
         if r.status_code == 401:
             return 4
+        elif r.status_code == 404:
+            logging.warning(f"Item {item[1]} not found on the server, removing from database.")
+            cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (item[0],))
+            db_connect.commit()
+            continue
         base_url = json.loads(r.text)['baseUrl']
         if 'image' in item[2]:
             r = requests.get(base_url+'=d', params=None, headers=None)
@@ -172,15 +177,15 @@ def list_albums():  # TODO
 
 
 def create_album(album_name):  # TODO
-    pass
+    return album_id
 
 
 def add_to_album(album_id, item_id):  # TODO
-    pass
+    return status_code
 
 
 def share_album(album_id):  # TODO
-    pass
+    return url
 
 
 def create_subfolders_in_storage():
