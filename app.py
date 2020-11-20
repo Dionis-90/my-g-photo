@@ -1,23 +1,52 @@
 #!/usr/bin/env python3.7
 
-import fileinput
 import json
 import os
 import requests
 import sqlite3
 import logging
 import datetime
+import webbrowser
 from config import *
 from oauth2client import file, client, tools
 
-# TODO make auth with googleapiclient
-
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
-SCOPES = 'https://www.googleapis.com/auth/photoslibrary'
+SCOPES = 'https://www.googleapis.com/auth/photoslibrary%20\
+https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata%20\
+https://www.googleapis.com/auth/photoslibrary.sharing'
+# SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
+#          'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
+#          'https://www.googleapis.com/auth/photoslibrary.sharing']
 
 
-def get_auth():
+def get_auth() -> int:
+    with open(IDENTITY_FILE_PATH) as f:
+        identity = json.load(f)['installed']
+    redirect_uri = identity['redirect_uris'][0]
+
+    url = f"{identity['auth_uri']}?scope={SCOPES}&response_type=code&\
+redirect_uri={redirect_uri}&client_id={identity['client_id']}"
+    print(f"If you do not have local browser please visit url: {url}")
+    webbrowser.open(url, new=0, autoraise=True)
+    code = input("Please enter the code: ")
+    token_uri = identity['token_uri']
+    data = {'code': code,
+            'client_id': identity['client_id'],
+            'client_secret': identity['client_secret'],
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code'}
+    r = requests.post(token_uri, data=data)
+    if r.status_code != 200:
+        logging.error(f"Not authenticated. http code: {r.status_code}, response: {r.text}.")
+        return 1
+    with open(OAUTH2_FILE_PATH, 'w') as f:
+        json.dump(json.loads(r.text), f)
+    logging.info("Authenticated successfully.")
+    return 0
+
+
+def get_auth_old():
     store = file.Storage(OAUTH2_FILE_PATH)
     creds = store.get()
     if not creds or creds.invalid:
@@ -26,26 +55,34 @@ def get_auth():
     if not os.path.exists(OAUTH2_FILE_PATH):
         print(f"File {OAUTH2_FILE_PATH} does not exist! Authentication unsuccessful.")
         exit(1)
-    return
 
 
-def read_credentials() -> json:
-    with open(OAUTH2_FILE_PATH) as oauth2_file:
-        oauth2_file_data = json.load(oauth2_file)
-        return oauth2_file_data
+def read_access_token() -> str:
+    if os.path.exists(ACCESS_TOKEN_FILE):
+        with open(ACCESS_TOKEN_FILE) as f:
+            new_access_token = json.load(f)['access_token']
+    elif os.path.exists(OAUTH2_FILE_PATH):
+        with open(OAUTH2_FILE_PATH) as f:
+            new_access_token = json.load(f)['access_token']
+    else:
+        print("Not authenticated.")
+        exit(1)
+    return new_access_token
 
 
 def refr_token():
-    values = {'client_id': credentials['client_id'],
-              'client_secret': credentials['client_secret'],
-              'refresh_token': credentials['refresh_token'],
+    with open(OAUTH2_FILE_PATH) as f:
+        oauth2_file_data = json.load(f)
+    with open(IDENTITY_FILE_PATH) as f:
+        identity_file_data = json.load(f)['installed']
+    values = {'client_id': identity_file_data['client_id'],
+              'client_secret': identity_file_data['client_secret'],
+              'refresh_token': oauth2_file_data['refresh_token'],
               'grant_type': 'refresh_token'}
-    response = requests.post(credentials['token_uri'], data=values)
-    new_access_token = json.loads(response.text)['access_token']
-    for line in fileinput.input(OAUTH2_FILE_PATH, inplace=True):
-        print(line.replace(credentials['access_token'], new_access_token)),
+    response = requests.post(identity_file_data['token_uri'], data=values)
+    with open(ACCESS_TOKEN_FILE, 'w') as f:
+        json.dump(json.loads(response.text), f)
     logging.info('Token has been refreshed.')
-    return
 
 
 def get_list_one_page(next_page_token) -> tuple:
@@ -64,7 +101,7 @@ def get_list_one_page(next_page_token) -> tuple:
     objects_count_on_page = '100'
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + credentials['access_token']}
+               'Authorization': 'Bearer ' + access_token}
     params = {'key': API_KEY,
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
@@ -120,7 +157,7 @@ def get_media_files() -> int:
     cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + credentials['access_token']}
+               'Authorization': 'Bearer ' + access_token}
     params = {'key': API_KEY}
 
     for item in selection:
@@ -176,16 +213,19 @@ def list_albums():  # TODO
     pass
 
 
-def create_album(album_name):  # TODO
-    return album_id
+def create_album(album_name) -> str:  # TODO
+    pass
+    # return album_id
 
 
-def add_to_album(album_id, item_id):  # TODO
-    return status_code
+def add_to_album(album_id, item_id) -> int:  # TODO
+    pass
+    # return status_code
 
 
-def share_album(album_id):  # TODO
-    return url
+def share_album(album_id) -> str:  # TODO
+    pass
+    # return url
 
 
 def create_subfolders_in_storage():
@@ -205,6 +245,10 @@ def create_subfolders_in_storage():
             logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
 
+logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
+logging.info('Started.')
+
 # Checking required paths.
 if not os.path.exists(IDENTITY_FILE_PATH):
     print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
@@ -215,15 +259,12 @@ if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
 if not os.path.exists(PATH_TO_IMAGES_STORAGE):
     print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
     exit(1)
+if not os.path.exists(OAUTH2_FILE_PATH):
+    auth_result = get_auth()
+    if auth_result != 0:
+        exit(1)
 
-get_auth()
-
-
-logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
-logging.info('Started.')
-
-credentials = read_credentials()
+access_token = read_access_token()
 db_connect = sqlite3.connect(DB_FILE_PATH)
 logging.info('Start retrieving a list of media items.')
 
@@ -242,7 +283,7 @@ while True:
     result = get_list_one_page(result[1])
     if result[0] == 30:
         refr_token()
-        credentials = read_credentials()
+        access_token = read_access_token()
     elif result[0] == 10:
         if list_received_status == '1':
             logging.warning("List has been retrieved.")
@@ -266,7 +307,7 @@ while True:
     result = get_media_files()
     if result == 4:
         refr_token()
-        credentials = read_credentials()
+        access_token = read_access_token()
     else:
         break
 db_connect.close()

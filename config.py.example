@@ -2,6 +2,7 @@
 
 API_KEY = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
 OAUTH2_FILE_PATH = 'storage.json'
+ACCESS_TOKEN_FILE = 'token.json'
 IDENTITY_FILE_PATH = 'client_id.json'
 DB_FILE_PATH = 'db.sqlite'
 PATH_TO_IMAGES_STORAGE = 'media/'
