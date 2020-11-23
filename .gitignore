@@ -6,3 +6,4 @@ storage.json
 media/*
 __*__
 config.py
+token.json

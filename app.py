@@ -41,7 +41,7 @@ redirect_uri={redirect_uri}&client_id={identity['client_id']}"
         logging.error(f"Not authenticated. http code: {r.status_code}, response: {r.text}.")
         return 1
     with open(OAUTH2_FILE_PATH, 'w') as f:
-        json.dump(json.loads(r.text), f)
+        json.dump(r.json(), f)
     logging.info("Authenticated successfully.")
     return 0
 
@@ -65,7 +65,7 @@ def read_access_token() -> str:
         with open(OAUTH2_FILE_PATH) as f:
             new_access_token = json.load(f)['access_token']
     else:
-        print("Not authenticated.")
+        logging.error("Not authenticated.")
         exit(1)
     return new_access_token
 
@@ -81,7 +81,7 @@ def refr_token():
               'grant_type': 'refresh_token'}
     response = requests.post(identity_file_data['token_uri'], data=values)
     with open(ACCESS_TOKEN_FILE, 'w') as f:
-        json.dump(json.loads(response.text), f)
+        json.dump(response.json(), f)
     logging.info('Token has been refreshed.')
 
 
@@ -115,13 +115,13 @@ def get_list_one_page(next_page_token) -> tuple:
         return 21, next_page_token
 
     try:
-        media_items = json.loads(r.text)['mediaItems']
+        media_items = r.json()['mediaItems']
     except KeyError:
         logging.warning(f"No mediaItems object in response. Response: {r.text}")
         return 22, next_page_token
 
     try:
-        new_next_page_token = json.loads(r.text)['nextPageToken']
+        new_next_page_token = r.json()['nextPageToken']
     except KeyError:
         logging.warning("No nextPageToken object in response. Probably end of the list.")
         new_next_page_token = None
@@ -169,7 +169,7 @@ def get_media_files() -> int:
             cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (item[0],))
             db_connect.commit()
             continue
-        base_url = json.loads(r.text)['baseUrl']
+        base_url = r.json()['baseUrl']
         if 'image' in item[2]:
             r = requests.get(base_url+'=d', params=None, headers=None)
         elif 'video' in item[2]:
