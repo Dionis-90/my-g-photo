@@ -12,20 +12,19 @@ from oauth2client import file, client, tools
 
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
-SCOPES = 'https://www.googleapis.com/auth/photoslibrary%20\
-https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata%20\
-https://www.googleapis.com/auth/photoslibrary.sharing'
-# SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
-#          'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
-#          'https://www.googleapis.com/auth/photoslibrary.sharing']
+SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
+          'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
+          'https://www.googleapis.com/auth/photoslibrary.sharing']
 
 
 def get_auth() -> int:
     with open(IDENTITY_FILE_PATH) as f:
         identity = json.load(f)['installed']
     redirect_uri = identity['redirect_uris'][0]
-
-    url = f"{identity['auth_uri']}?scope={SCOPES}&response_type=code&\
+    scope = ''
+    for i in SCOPES:
+        scope += i+'%20'
+    url = f"{identity['auth_uri']}?scope={scope}&response_type=code&\
 redirect_uri={redirect_uri}&client_id={identity['client_id']}"
     print(f"If you do not have local browser please visit url: {url}")
     webbrowser.open(url, new=0, autoraise=True)
@@ -214,18 +213,21 @@ def list_albums():  # TODO
 
 
 def create_album(album_name) -> str:  # TODO
+    print(album_name)
     pass
-    # return album_id
+    return album_id
 
 
 def add_to_album(album_id, item_id) -> int:  # TODO
+    print(album_id, item_id)
     pass
-    # return status_code
+    return status_code
 
 
 def share_album(album_id) -> str:  # TODO
+    print(album_id)
     pass
-    # return url
+    return url
 
 
 def create_subfolders_in_storage():
