@@ -84,19 +84,24 @@ def refr_token():
     logging.info('Token has been refreshed.')
 
 
-def get_list_one_page(next_page_token) -> tuple:
+def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
     """
     Gets one page of media objects list and puts metadata into the database.
-    :param next_page_token: We receive this token in response after successful execution of this function.
-        At the first run we need to set this as None.
+    :param
+        mode: 'fetch_all' - returns 0 if media object meta info already in the list,
+              'fetch_last' - returns 10 if media object meta info already in the list,
+        next_page_token: We receive this token in response after successful execution of this function.
+                         At the first run we need to set this as None.
     :return: (exit_code, next_page_token):
-         0 - got page of list and nextPageToken successfully.
-        10 - media object metadata already exists in database.
-        21 - not http 200 code when trying to get page of list.
+         0 - Got page of list and nextPageToken successfully.
+        10 - Media object metadata already exists in database.
+        20 - Unexpected error.
+        21 - Not http 200 code when trying to get page of list.
         22 - No mediaItems object in response.
         23 - No nextPageToken object in response.
         30 - http 401 code, the token may have expired.
     """
+    logging.info(f"Function running in {mode} mode.")
     objects_count_on_page = '100'
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
@@ -127,19 +132,21 @@ def get_list_one_page(next_page_token) -> tuple:
         return 23, new_next_page_token
 
     for item in media_items:
-        objects_already_exists = False
         values = (item['id'], item['filename'], item['mimeType'], item['mediaMetadata']['creationTime'])
         try:
             cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
             VALUES (?, ?, ?, ?)', values)
         except sqlite3.IntegrityError:
-            logging.info(f"Media item {item['filename']} already in the list.")
-            objects_already_exists = True
-            continue
+            if mode == 'fetch_last':
+                return 10, new_next_page_token
+            elif mode == 'fetch_all':
+                logging.info(f"Media item {item['filename']} already in the list.")
+                continue
+            else:
+                logging.error("Unexpected error.")
+                return 20, new_next_page_token
         finally:
             db_connect.commit()
-    if objects_already_exists:
-        return 10, new_next_page_token
     return 0, new_next_page_token
 
 
@@ -264,28 +271,34 @@ def main():
         if auth_result != 0:
             exit(1)
 
-    # access_token = read_access_token()
     logging.info('Start retrieving a list of media items.')
 
     create_subfolders_in_storage()
 
-    # Get list of media and write info into the DB (pagination).
-    c = db_connect.cursor()
-    c.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
+    # Get list of media and write meta information into the DB (pagination).
+    cur_db_connection = db_connect.cursor()
+    cur_db_connection.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
     db_connect.commit()
     result = (0, None)
+    page = 0
     while True:
-        c.execute("SELECT value FROM account_info WHERE key='list_received'")
-        list_received_status = c.fetchone()[0]
-        result = get_list_one_page(result[1])
+        cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
+        list_received_status = cur_db_connection.fetchone()[0]
+        if list_received_status == '0':
+            result = get_list_one_page(result[1], mode='fetch_all')
+        elif list_received_status == '1':
+            result = get_list_one_page(result[1], mode='fetch_last')
+        else:
+            logging.error(f'Unexpected error. Returns code - {result[0]}.')
+            exit(1)
+
         if result[0] == 30:
             refr_token()
         elif result[0] == 10:
-            if list_received_status == '1':
-                logging.warning("List has been retrieved.")
-                break
+            logging.warning("List of media items retrieved.")
+            break
         elif result[0] == 22 or result[0] == 23:
-            c.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+            cur_db_connection.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
             db_connect.commit()
             logging.warning("List has been retrieved.")
             break
@@ -293,9 +306,8 @@ def main():
             logging.error(f"Application error. Returns code - {result[0]}.")
             db_connect.close()
             exit(1)
-        else:
-            logging.error("Unexpected error.")
-            exit(1)
+        page += 1
+        logging.info(f"Page N {page} processed.")
 
     # Download media files to media folder.
     logging.info('Start downloading a list of media items.')
