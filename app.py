@@ -100,7 +100,7 @@ def get_list_one_page(next_page_token) -> tuple:
     objects_count_on_page = '100'
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + access_token}
+               'Authorization': 'Bearer '+read_access_token()}
     params = {'key': API_KEY,
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
@@ -156,7 +156,7 @@ def get_media_files() -> int:
     cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + access_token}
+               'Authorization': 'Bearer ' + read_access_token()}
     params = {'key': API_KEY}
 
     for item in selection:
@@ -214,19 +214,18 @@ def list_albums():  # TODO
 
 def create_album(album_name) -> str:  # TODO
     print(album_name)
-    pass
+    album_id = ''
     return album_id
 
 
 def add_to_album(album_id, item_id) -> int:  # TODO
     print(album_id, item_id)
-    pass
-    return status_code
+    return 0
 
 
 def share_album(album_id) -> str:  # TODO
     print(album_id)
-    pass
+    url = ''
     return url
 
 
@@ -247,70 +246,74 @@ def create_subfolders_in_storage():
             logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
 
-logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
-logging.info('Started.')
+def main():
+    logging.info('Started.')
 
-# Checking required paths.
-if not os.path.exists(IDENTITY_FILE_PATH):
-    print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
-    exit(1)
-if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
-    print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
-    exit(1)
-if not os.path.exists(PATH_TO_IMAGES_STORAGE):
-    print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
-    exit(1)
-if not os.path.exists(OAUTH2_FILE_PATH):
-    auth_result = get_auth()
-    if auth_result != 0:
+    # Checking required paths.
+    if not os.path.exists(IDENTITY_FILE_PATH):
+        print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
         exit(1)
+    if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
+        print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
+        exit(1)
+    if not os.path.exists(PATH_TO_IMAGES_STORAGE):
+        print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
+        exit(1)
+    if not os.path.exists(OAUTH2_FILE_PATH):
+        auth_result = get_auth()
+        if auth_result != 0:
+            exit(1)
 
-access_token = read_access_token()
-db_connect = sqlite3.connect(DB_FILE_PATH)
-logging.info('Start retrieving a list of media items.')
+    # access_token = read_access_token()
+    logging.info('Start retrieving a list of media items.')
 
+    create_subfolders_in_storage()
 
-create_subfolders_in_storage()
-
-
-# Get list of media and write info into the DB.
-c = db_connect.cursor()
-c.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
-db_connect.commit()
-result = (0, None)
-while True:
-    c.execute("SELECT value FROM account_info WHERE key='list_received'")
-    list_received_status = c.fetchone()[0]
-    result = get_list_one_page(result[1])
-    if result[0] == 30:
-        refr_token()
-        access_token = read_access_token()
-    elif result[0] == 10:
-        if list_received_status == '1':
+    # Get list of media and write info into the DB (pagination).
+    c = db_connect.cursor()
+    c.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
+    db_connect.commit()
+    result = (0, None)
+    while True:
+        c.execute("SELECT value FROM account_info WHERE key='list_received'")
+        list_received_status = c.fetchone()[0]
+        result = get_list_one_page(result[1])
+        if result[0] == 30:
+            refr_token()
+        elif result[0] == 10:
+            if list_received_status == '1':
+                logging.warning("List has been retrieved.")
+                break
+        elif result[0] == 22 or result[0] == 23:
+            c.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+            db_connect.commit()
             logging.warning("List has been retrieved.")
             break
-    elif result[0] == 22 or result[0] == 23:
-        c.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
-        db_connect.commit()
-        logging.warning("List has been retrieved.")
-        break
-    elif result[0] != 0:
-        logging.error(f"Application error. Returns code - {result[0]}.")
-        db_connect.close()
-        exit(1)
-    else:
-        logging.error("Unexpected error.")
-        exit(1)
+        elif result[0] != 0:
+            logging.error(f"Application error. Returns code - {result[0]}.")
+            db_connect.close()
+            exit(1)
+        else:
+            logging.error("Unexpected error.")
+            exit(1)
 
-# Download media files to media folder.
-logging.info('Start downloading a list of media items.')
-while True:
-    result = get_media_files()
-    if result == 4:
-        refr_token()
-        access_token = read_access_token()
-    else:
-        break
+    # Download media files to media folder.
+    logging.info('Start downloading a list of media items.')
+    while True:
+        result = get_media_files()
+        if result == 4:
+            refr_token()
+        else:
+            break
+
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
+db_connect = sqlite3.connect(DB_FILE_PATH)
+
+
+main()
+
+
 db_connect.close()
 logging.info('Finished.')
