@@ -15,6 +15,11 @@ SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
           'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
           'https://www.googleapis.com/auth/photoslibrary.sharing']
+DB = sqlite3.connect(DB_FILE_PATH)
+
+# Logging global config
+logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
 def get_auth() -> int:
@@ -109,7 +114,7 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
     params = {'key': API_KEY,
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
-    cur_db_connection = db_connect.cursor()
+    cur_db_connection = DB.cursor()
     r = requests.get(url, params=params, headers=headers)
     if r.status_code == 401:
         return 30, next_page_token
@@ -146,7 +151,7 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
                 logging.error("Unexpected error.")
                 return 20, new_next_page_token
         finally:
-            db_connect.commit()
+            DB.commit()
     return 0, new_next_page_token
 
 
@@ -159,7 +164,7 @@ def get_media_files() -> int:
         1 or 2 or 3 - unexpected error.
         4 - http 401 code, the token may have expired.
     """
-    cur_db_connection = db_connect.cursor()
+    cur_db_connection = DB.cursor()
     cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
@@ -173,7 +178,7 @@ def get_media_files() -> int:
         elif r.status_code == 404:
             logging.warning(f"Item {item[1]} not found on the server, removing from database.")
             cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (item[0],))
-            db_connect.commit()
+            DB.commit()
             continue
         base_url = r.json()['baseUrl']
         if 'image' in item[2]:
@@ -192,7 +197,7 @@ def get_media_files() -> int:
             if os.path.exists(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
-                db_connect.commit()
+                DB.commit()
                 continue
             f = open(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
@@ -201,7 +206,7 @@ def get_media_files() -> int:
             if os.path.exists(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
-                db_connect.commit()
+                DB.commit()
                 continue
             f = open(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1], 'wb')
             f.write(r.content)
@@ -211,7 +216,7 @@ def get_media_files() -> int:
             return 3
         logging.info(f'Item {item[1]} stored.')
         cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (item[0],))
-        db_connect.commit()
+        DB.commit()
     return 0
 
 
@@ -237,7 +242,7 @@ def share_album(album_id) -> str:  # TODO
 
 
 def create_subfolders_in_storage():
-    cur_db_connection = db_connect.cursor()
+    cur_db_connection = DB.cursor()
     cur_db_connection.execute("SELECT creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     subfolders = set()
@@ -276,9 +281,9 @@ def main():
     create_subfolders_in_storage()
 
     # Get list of media and write meta information into the DB (pagination).
-    cur_db_connection = db_connect.cursor()
+    cur_db_connection = DB.cursor()
     cur_db_connection.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
-    db_connect.commit()
+    DB.commit()
     result = (0, None)
     page = 0
     while True:
@@ -299,12 +304,12 @@ def main():
             break
         elif result[0] == 22 or result[0] == 23:
             cur_db_connection.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
-            db_connect.commit()
+            DB.commit()
             logging.warning("List has been retrieved.")
             break
         elif result[0] != 0:
             logging.error(f"Application error. Returns code - {result[0]}.")
-            db_connect.close()
+            DB.close()
             exit(1)
         page += 1
         logging.info(f"Page N {page} processed.")
@@ -317,15 +322,10 @@ def main():
             refr_token()
         else:
             break
+    logging.info('Finished.')
 
 
-logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
-db_connect = sqlite3.connect(DB_FILE_PATH)
+if __name__ == '__main__':
+    main()
 
-
-main()
-
-
-db_connect.close()
-logging.info('Finished.')
+DB.close()
