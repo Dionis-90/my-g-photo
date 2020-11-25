@@ -93,18 +93,19 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
     """
     Gets one page of media objects list and puts metadata into the database.
     :param
-        mode: 'fetch_all' - returns 0 if media object meta info already in the list,
-              'fetch_last' - returns 10 if media object meta info already in the list,
+        mode: 'fetch_all' - if media object meta info already in the DB tries to get whole page and returns 0,
+              'fetch_last' - returns 10 immediately if media object meta info already in the DB,
         next_page_token: We receive this token in response after successful execution of this function.
                          At the first run we need to set this as None.
     :return: (exit_code, next_page_token):
-         0 - Got page of list and nextPageToken successfully.
-        10 - Media object metadata already exists in database.
-        20 - Unexpected error.
-        21 - Not http 200 code when trying to get page of list.
-        22 - No mediaItems object in response.
-        23 - No nextPageToken object in response.
-        30 - http 401 code, the token may have expired.
+        exit_codes:
+             0 - Got page of list and nextPageToken successfully.
+            10 - Media object metadata already exists in database.
+            20 - Unexpected error.
+            21 - Not http 200 code when trying to get page of list.
+            22 - No mediaItems object in response.
+            23 - No nextPageToken object in response.
+            30 - http 401 code, the token may have expired.
     """
     logging.info(f"Function running in {mode} mode.")
     objects_count_on_page = '100'
@@ -157,7 +158,7 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
 
 def get_media_files() -> int:
     """
-    Downloads media files to media folder and marks 1 in 'stored' field.
+    Downloads media files to media folders and marks 1 in 'stored' field.
     If file already exist, marks it 2 in 'stored' field.
     :return:
         0 - success.
@@ -320,8 +321,15 @@ def main():
         result = get_media_files()
         if result == 4:
             refr_token()
-        else:
+        elif result == 0:
+            logging.info("All media items stored.")
             break
+        elif result != 0:
+            logging.error(f"Application error. Returns code - {result}.")
+            exit(1)
+        else:
+            logging.error(f'Unexpected error. Returns code - {result}.')
+            exit(1)
     logging.info('Finished.')
 
 
