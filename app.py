@@ -4,11 +4,9 @@ import json
 import os
 import requests
 import sqlite3
-import logging
 import datetime
 import webbrowser
 from config import *
-from oauth2client import file, client, tools
 
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
@@ -16,10 +14,6 @@ SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
           'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
           'https://www.googleapis.com/auth/photoslibrary.sharing']
 DB = sqlite3.connect(DB_FILE_PATH)
-
-# Logging global config
-logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
 def get_auth() -> int:
@@ -40,25 +34,14 @@ redirect_uri={redirect_uri}&client_id={identity['client_id']}"
             'client_secret': identity['client_secret'],
             'redirect_uri': redirect_uri,
             'grant_type': 'authorization_code'}
-    r = requests.post(token_uri, data=data)
-    if r.status_code != 200:
-        logging.error(f"Not authenticated. http code: {r.status_code}, response: {r.text}.")
+    response = requests.post(token_uri, data=data)
+    if response.status_code != 200:
+        logging.error(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
         return 1
     with open(OAUTH2_FILE_PATH, 'w') as f:
-        json.dump(r.json(), f)
+        json.dump(response.json(), f)
     logging.info("Authenticated successfully.")
     return 0
-
-
-def get_auth_old():
-    store = file.Storage(OAUTH2_FILE_PATH)
-    creds = store.get()
-    if not creds or creds.invalid:
-        flow = client.flow_from_clientsecrets(IDENTITY_FILE_PATH, SCOPES)
-        tools.run_flow(flow, store)
-    if not os.path.exists(OAUTH2_FILE_PATH):
-        print(f"File {OAUTH2_FILE_PATH} does not exist! Authentication unsuccessful.")
-        exit(1)
 
 
 def read_access_token() -> str:
@@ -74,7 +57,7 @@ def read_access_token() -> str:
     return new_access_token
 
 
-def refr_token():
+def refresh_access_token():
     with open(OAUTH2_FILE_PATH) as f:
         oauth2_file_data = json.load(f)
     with open(IDENTITY_FILE_PATH) as f:
@@ -116,22 +99,22 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
     cur_db_connection = DB.cursor()
-    r = requests.get(url, params=params, headers=headers)
-    if r.status_code == 401:
+    response = requests.get(url, params=params, headers=headers)
+    if response.status_code == 401:
         return 30, next_page_token
-    elif r.status_code != 200:
-        logging.warning(f"http code {r.status_code} when trying to get page of list with next_page_token: \
-                        {next_page_token}, response: {r.text}")
+    elif response.status_code != 200:
+        logging.warning(f"http code {response.status_code} when trying to get page of list with next_page_token: \
+                        {next_page_token}, response: {response.text}")
         return 21, next_page_token
 
     try:
-        media_items = r.json()['mediaItems']
+        media_items = response.json()['mediaItems']
     except KeyError:
-        logging.warning(f"No mediaItems object in response. Response: {r.text}")
+        logging.warning(f"No mediaItems object in response. Response: {response.text}")
         return 22, next_page_token
 
     try:
-        new_next_page_token = r.json()['nextPageToken']
+        new_next_page_token = response.json()['nextPageToken']
     except KeyError:
         logging.warning("No nextPageToken object in response. Probably end of the list.")
         new_next_page_token = None
@@ -173,49 +156,50 @@ def get_media_files() -> int:
     params = {'key': API_KEY}
 
     for item in selection:
-        r = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
-        if r.status_code == 401:
+        response = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
+        if response.status_code == 401:
             return 4
-        elif r.status_code == 404:
+        elif response.status_code == 404:
             logging.warning(f"Item {item[1]} not found on the server, removing from database.")
             cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (item[0],))
             DB.commit()
             continue
-        base_url = r.json()['baseUrl']
+        base_url = response.json()['baseUrl']
         if 'image' in item[2]:
-            r = requests.get(base_url+'=d', params=None, headers=None)
+            response = requests.get(base_url+'=d', params=None, headers=None)
         elif 'video' in item[2]:
-            r = requests.get(base_url+'=dv', params=None, headers=None)
+            response = requests.get(base_url+'=dv', params=None, headers=None, stream=True)
         else:
             logging.error('Unexpected error.')
             return 1
         year_of_item = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
-        subfolder_name = str(year_of_item)+'/'
-        if 'text/html' in r.headers['Content-Type']:
-            logging.error(f"Unexpected error: {r.text}")
+        sub_folder_name = str(year_of_item)+'/'
+        if 'text/html' in response.headers['Content-Type']:
+            logging.error(f"Error. Server returns: {response.text}")
             return 2
-        elif 'image' in r.headers['Content-Type']:
-            if os.path.exists(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1]):
+        elif 'image' in response.headers['Content-Type']:
+            if os.path.exists(PATH_TO_IMAGES_STORAGE+sub_folder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 DB.commit()
                 continue
-            f = open(PATH_TO_IMAGES_STORAGE+subfolder_name+item[1], 'wb')
-            f.write(r.content)
-            f.close()
-        elif 'video' in r.headers['Content-Type']:
-            if os.path.exists(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1]):
+            media_file = open(PATH_TO_IMAGES_STORAGE+sub_folder_name+item[1], 'wb')
+            media_file.write(response.content)
+            media_file.close()
+        elif 'video' in response.headers['Content-Type']:
+            if os.path.exists(PATH_TO_VIDEOS_STORAGE+sub_folder_name+item[1]):
                 logging.warning(f"File {item[1]} already exist in local storage! Setting 'stored = 2' in database.")
                 cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (item[0],))
                 DB.commit()
                 continue
-            f = open(PATH_TO_VIDEOS_STORAGE+subfolder_name+item[1], 'wb')
-            f.write(r.content)
-            f.close()
+            media_file = open(PATH_TO_VIDEOS_STORAGE+sub_folder_name+item[1], 'wb')
+            for chunk in response.iter_content(chunk_size=1024):
+                media_file.write(chunk)
+            media_file.close()
         else:
             logging.error('Unexpected error.')
             return 3
-        logging.info(f'Item {item[1]} stored.')
+        logging.info(f'Media file {item[1]} stored.')
         cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (item[0],))
         DB.commit()
     return 0
@@ -242,15 +226,15 @@ def share_album(album_id) -> str:  # TODO
     return url
 
 
-def create_subfolders_in_storage():
+def create_sub_folders_in_storage():
     cur_db_connection = DB.cursor()
     cur_db_connection.execute("SELECT creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
-    subfolders = set()
+    sub_folders = set()
     for item in selection:
         year = datetime.datetime.strptime(item[0], "%Y-%m-%dT%H:%M:%SZ").year
-        subfolders.add(str(year))
-    for item in subfolders:
+        sub_folders.add(str(year))
+    for item in sub_folders:
         if not os.path.exists(PATH_TO_IMAGES_STORAGE+item):
             os.makedirs(PATH_TO_IMAGES_STORAGE+item)
             logging.info(f"Folder {PATH_TO_IMAGES_STORAGE+item} has been created.")
@@ -279,7 +263,7 @@ def main():
 
     logging.info('Start retrieving a list of media items.')
 
-    create_subfolders_in_storage()
+    create_sub_folders_in_storage()
 
     # Get list of media and write meta information into the DB (pagination).
     cur_db_connection = DB.cursor()
@@ -299,7 +283,7 @@ def main():
             exit(1)
 
         if result[0] == 30:
-            refr_token()
+            refresh_access_token()
         elif result[0] == 10:
             logging.warning("List of media items retrieved.")
             break
@@ -320,7 +304,7 @@ def main():
     while True:
         result = get_media_files()
         if result == 4:
-            refr_token()
+            refresh_access_token()
         elif result == 0:
             logging.info("All media items stored.")
             break

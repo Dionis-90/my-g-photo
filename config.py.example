@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.7
+import logging
 
 API_KEY = 'AIzaSyCk1qpI9w87PqlS1SgJlwdroAGYqHgZEEs'
 OAUTH2_FILE_PATH = 'storage.json'
@@ -8,3 +8,6 @@ DB_FILE_PATH = 'db.sqlite'
 PATH_TO_IMAGES_STORAGE = 'media/'
 PATH_TO_VIDEOS_STORAGE = 'media/'
 LOG_FILE_PATH = 'working.log'
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
