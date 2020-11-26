@@ -314,10 +314,9 @@ def main():
         else:
             logging.error(f'Unexpected error. Returns code - {result}.')
             exit(1)
+    DB.close()
     logging.info('Finished.')
 
 
 if __name__ == '__main__':
     main()
-
-DB.close()
