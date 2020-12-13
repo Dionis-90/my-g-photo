@@ -16,63 +16,74 @@ SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
 DB = sqlite3.connect(DB_FILE_PATH)
 
 
-def get_auth() -> int:
-    with open(IDENTITY_FILE_PATH) as f:
-        identity = json.load(f)['installed']
-    redirect_uri = identity['redirect_uris'][0]
-    scope = ''
-    for i in SCOPES:
-        scope += i+'%20'
-    url = f"{identity['auth_uri']}?scope={scope}&response_type=code&\
-redirect_uri={redirect_uri}&client_id={identity['client_id']}"
-    print(f"If you do not have local browser please visit url: {url}")
-    webbrowser.open(url, new=0, autoraise=True)
-    code = input("Please enter the code: ")
-    token_uri = identity['token_uri']
-    data = {'code': code,
-            'client_id': identity['client_id'],
-            'client_secret': identity['client_secret'],
-            'redirect_uri': redirect_uri,
-            'grant_type': 'authorization_code'}
-    response = requests.post(token_uri, data=data)
-    if response.status_code != 200:
-        logging.error(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
-        return 1
-    with open(OAUTH2_FILE_PATH, 'w') as f:
-        json.dump(response.json(), f)
-    logging.info("Authenticated successfully.")
-    return 0
-
-
-def read_access_token() -> str:
-    if os.path.exists(ACCESS_TOKEN_FILE):
-        with open(ACCESS_TOKEN_FILE) as f:
-            new_access_token = json.load(f)['access_token']
-    elif os.path.exists(OAUTH2_FILE_PATH):
+class Authorization:
+    def __init__(self):
+        with open(IDENTITY_FILE_PATH) as file_data:
+            self.identity_data = json.load(file_data)['installed']
+        scopes_for_uri = ''
+        for scope in SCOPES:
+            scopes_for_uri += scope+'%20'
+        self.url = f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
+                   f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
+        if not os.path.exists(OAUTH2_FILE_PATH):
+            auth_result = self.authenticate()
+            if auth_result != 0:
+                logging.error("Unexpected error.")
+                exit(1)
         with open(OAUTH2_FILE_PATH) as f:
-            new_access_token = json.load(f)['access_token']
-    else:
-        logging.error("Not authenticated.")
-        exit(1)
-    return new_access_token
+            self.oauth2_data = json.load(f)
+        self.access_token = self.oauth2_data['access_token']
+
+    def authenticate(self) -> int:
+        print(f"If you do not have local browser please visit url: {self.url}")
+        webbrowser.open(self.url, new=0, autoraise=True)
+        code = input("Please enter the code: ")
+        data = {'code': code,
+                'client_id': self.identity_data['client_id'],
+                'client_secret': self.identity_data['client_secret'],
+                'redirect_uri': self.identity_data['redirect_uris'][0],
+                'grant_type': 'authorization_code'}
+        response = requests.post(self.identity_data['token_uri'], data=data)
+        if response.status_code != 200:
+            logging.error(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
+            return 1
+        with open(OAUTH2_FILE_PATH, 'w') as f:
+            json.dump(response.json(), f)
+        logging.info("Authenticated successfully.")
+        return 0
+
+    def get_access_token(self):
+        if os.path.exists(ACCESS_TOKEN_FILE):
+            with open(ACCESS_TOKEN_FILE) as f:
+                self.access_token = json.load(f)['access_token']
+        elif os.path.exists(OAUTH2_FILE_PATH):
+            with open(OAUTH2_FILE_PATH) as f:
+                self.access_token = json.load(f)['access_token']
+        else:
+            logging.error("Not authenticated.")
+            return 1
+        return self.access_token
+
+    def refresh_access_token(self):
+        values = {'client_id': self.identity_data['client_id'],
+                  'client_secret': self.identity_data['client_secret'],
+                  'refresh_token': self.oauth2_data['refresh_token'],
+                  'grant_type': 'refresh_token'}
+        response = requests.post(self.identity_data['token_uri'], data=values)
+        with open(ACCESS_TOKEN_FILE, 'w') as f:
+            json.dump(response.json(), f)
+        logging.info('Token has been refreshed.')
 
 
-def refresh_access_token():
-    with open(OAUTH2_FILE_PATH) as f:
-        oauth2_file_data = json.load(f)
-    with open(IDENTITY_FILE_PATH) as f:
-        identity_file_data = json.load(f)['installed']
-    values = {'client_id': identity_file_data['client_id'],
-              'client_secret': identity_file_data['client_secret'],
-              'refresh_token': oauth2_file_data['refresh_token'],
-              'grant_type': 'refresh_token'}
-    response = requests.post(identity_file_data['token_uri'], data=values)
-    with open(ACCESS_TOKEN_FILE, 'w') as f:
-        json.dump(response.json(), f)
-    logging.info('Token has been refreshed.')
+class MediaItem:
+    pass
 
 
-def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
+class Mainloop:
+    pass
+
+
+def get_list_one_page(next_page_token, authorization, mode='fetch_all') -> tuple:
     """
     Gets one page of media objects list and puts metadata into the database.
     :param
@@ -94,7 +105,7 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
     objects_count_on_page = '100'
     url = SRV_ENDPOINT+'mediaItems'
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer '+read_access_token()}
+               'Authorization': 'Bearer '+authorization.get_access_token()}
     params = {'key': API_KEY,
               'pageSize': objects_count_on_page,
               'pageToken': next_page_token}
@@ -139,20 +150,21 @@ def get_list_one_page(next_page_token, mode='fetch_all') -> tuple:
     return 0, new_next_page_token
 
 
-def get_media_files() -> int:
+def get_media_files(authorization) -> int:
     """
     Downloads media files to media folders and marks 1 in 'stored' field.
     If file already exist, marks it 2 in 'stored' field.
     :return:
         0 - success.
-        1 or 2 or 3 - unexpected error.
+        1 or 3 - unexpected error.
+        2 - server returns a text.
         4 - http 401 code, the token may have expired.
     """
     cur_db_connection = DB.cursor()
     cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
     selection = cur_db_connection.fetchall()
     headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + read_access_token()}
+               'Authorization': 'Bearer ' + authorization.get_access_token()}
     params = {'key': API_KEY}
 
     for item in selection:
@@ -256,11 +268,7 @@ def main():
     if not os.path.exists(PATH_TO_IMAGES_STORAGE):
         print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
         exit(1)
-    if not os.path.exists(OAUTH2_FILE_PATH):
-        auth_result = get_auth()
-        if auth_result != 0:
-            exit(1)
-
+    authorization = Authorization()
     logging.info('Start retrieving a list of media items.')
 
     create_sub_folders_in_storage()
@@ -275,15 +283,17 @@ def main():
         cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
         list_received_status = cur_db_connection.fetchone()[0]
         if list_received_status == '0':
-            result = get_list_one_page(result[1], mode='fetch_all')
+            result = get_list_one_page(result[1], authorization, mode='fetch_all')
         elif list_received_status == '1':
-            result = get_list_one_page(result[1], mode='fetch_last')
+            result = get_list_one_page(result[1], authorization, mode='fetch_last')
         else:
             logging.error(f'Unexpected error. Returns code - {result[0]}.')
             exit(1)
 
         if result[0] == 30:
-            refresh_access_token()
+            # refresh_access_token()
+            authorization.refresh_access_token()
+            continue
         elif result[0] == 10:
             logging.warning("List of media items retrieved.")
             break
@@ -302,9 +312,9 @@ def main():
     # Download media files to media folder.
     logging.info('Start downloading a list of media items.')
     while True:
-        result = get_media_files()
+        result = get_media_files(authorization)
         if result == 4:
-            refresh_access_token()
+            authorization.refresh_access_token()
         elif result == 0:
             logging.info("All media items stored.")
             break
@@ -314,6 +324,7 @@ def main():
         else:
             logging.error(f'Unexpected error. Returns code - {result}.')
             exit(1)
+
     DB.close()
     logging.info('Finished.')
 
