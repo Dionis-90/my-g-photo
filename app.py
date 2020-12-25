@@ -94,7 +94,6 @@ def get_media_files(authorization) -> int:
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + authorization.get_access_token()}
     params = {'key': API_KEY}
-
     for item in selection:
         response = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
         if response.status_code == 401:
@@ -171,11 +170,11 @@ def main():
         exit(1)
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
         print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
-        exit(1)
+        exit(2)
     if not os.path.exists(PATH_TO_IMAGES_STORAGE):
         print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
-        exit(1)
-    authorization = Authorization()
+        exit(3)
+    auth = Authorization()
     logging.info('Start retrieving a list of media items.')
 
     create_sub_folders_in_storage()
@@ -190,16 +189,15 @@ def main():
         cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
         list_received_status = cur_db_connection.fetchone()[0]
         if list_received_status == '0':
-            result = get_list_one_page(result[1], authorization, mode='fetch_all')
+            result = get_list_one_page(result[1], auth, mode='fetch_all')
         elif list_received_status == '1':
-            result = get_list_one_page(result[1], authorization, mode='fetch_last')
+            result = get_list_one_page(result[1], auth, mode='fetch_last')
         else:
             logging.error(f'Unexpected error. Returns code - {result[0]}.')
-            exit(1)
+            exit(4)
 
         if result[0] == 30:
-            # refresh_access_token()
-            authorization.refresh_access_token()
+            auth.refresh_access_token()
             continue
         elif result[0] == 10:
             logging.warning("List of media items retrieved.")
@@ -212,25 +210,25 @@ def main():
         elif result[0] != 0:
             logging.error(f"Application error. Returns code - {result[0]}.")
             DB.close()
-            exit(1)
+            exit(5)
         page += 1
-        logging.info(f"Page N {page} processed.")
+        logging.info(f"{page} pages processed.")
 
     # Download media files to media folder.
     logging.info('Start downloading a list of media items.')
     while True:
-        result = get_media_files(authorization)
+        result = get_media_files(auth)
         if result == 4:
-            authorization.refresh_access_token()
+            auth.refresh_access_token()
         elif result == 0:
             logging.info("All media items stored.")
             break
         elif result != 0:
             logging.error(f"Application error. Returns code - {result}.")
-            exit(1)
+            exit(6)
         else:
             logging.error(f'Unexpected error. Returns code - {result}.')
-            exit(1)
+            exit(7)
 
     DB.close()
     logging.info('Finished.')
