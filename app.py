@@ -1,5 +1,7 @@
 #!/usr/bin/env python3.7
 
+# This is a script that gets, downloads media files and metadata from your Google Photo storage to your local storage.
+
 import sqlite3
 import datetime
 from authorization import *
