@@ -4,8 +4,6 @@
 
 import sqlite3
 import datetime
-import time
-from threading import Thread
 from authorization import *
 
 # Define constants
@@ -13,103 +11,40 @@ SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 DB = sqlite3.connect(DB_FILE_PATH)
 
 
-class MediaItemsMetadata:
-    def __init__(self):
-        self.metadata = []
+class MediaItem:
+    def __init__(self, metadata):
+        self.metadata = metadata
+        self.id = metadata['id']
+        self.base_url = metadata['baseUrl']
+        self.mime_type = metadata['mimeType']
+        self.filename = metadata['filename']
+        self.creation_time = metadata['mediaMetadata']['creationTime']
+        self.creation_year = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
+        self.width = metadata['mediaMetadata']['width']
+        self.height = metadata['mediaMetadata']['height']
+
+    def write_metadata_to_db(self) -> int:
         cur_db_connection = DB.cursor()
-        cur_db_connection.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
-        DB.commit()
-        cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
-        list_received_status = cur_db_connection.fetchone()[0]
-        if list_received_status == '0':
-            self.mode = 'write_all'
-        elif list_received_status == '1':
-            self.mode = 'write_latest'
-        else:
-            logging.error(f'Unexpected error.')
-
-    def get_from_server(self, auth) -> int:
-        logging.info('Start retrieving a list of media items.')
-        objects_count_on_page = '100'
-        url = SRV_ENDPOINT+'mediaItems'
-        next_page_token = None
-        page = 0
-        while stop == 0:
-            params = {'key': API_KEY,
-                      'pageSize': objects_count_on_page,
-                      'pageToken': next_page_token}
-            headers = {'Accept': 'application/json',
-                       'Authorization': 'Bearer ' + auth.get_access_token()}
-            response = requests.get(url, params=params, headers=headers)
-            if response.status_code == 401:
-                auth.refresh_access_token()
-                continue
-            elif response.status_code != 200:
-                logging.warning(f"http code {response.status_code} when trying to get page of list with "
-                                f"next_page_token: {next_page_token}, response: {response.text}")
-                return 21
-            try:
-                self.metadata.extend(response.json()['mediaItems'])
-            except KeyError:
-                logging.warning(f"No mediaItems object in response. Response: {response.text}")
-                return 22
-            try:
-                next_page_token = response.json()['nextPageToken']
-            except KeyError:
-                logging.warning("No nextPageToken object in response. Probably got end of the list.")
-                return 23
-            page += 1
-            logging.info(f"{page} pages processed.")
-
-    def write_to_db(self):
-        db = sqlite3.connect(DB_FILE_PATH)
-        cur_db_connection = db.cursor()
-        items = 0
-        for item in self.metadata:
-            values = (item['id'], item['filename'], item['mimeType'], item['mediaMetadata']['creationTime'])
-            try:
-                cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
+        values = (self.id, self.filename, self.mime_type, self.creation_time)
+        try:
+            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
                     VALUES (?, ?, ?, ?)', values)
-            except sqlite3.IntegrityError:
-                if self.mode == 'write_latest':
-                    logging.info("Latest media items metadata wrote.")
-                    return 10
-                elif self.mode == 'write_all':
-                    logging.info(f"Media item {item['filename']} already in the list.")
-                    continue
-                else:
-                    logging.error("Unexpected error.")
-                    return 20
-            finally:
-                db.commit()
-            items += 1
-            logging.info(f"{items} items processed.")
-        cur_db_connection.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
-        db.commit()
-        db.close()
-        logging.warning("List has been retrieved.")
+            DB.commit()
+        except sqlite3.IntegrityError:
+            logging.info(f"Media item {self.filename} already in the list.")
+            return 20
         return 0
 
-
-class MediaFile:
-    def __init__(self, metadata):
-        self.creation_time = metadata[0]
-        self.object_id = metadata[1]
-        self.filename = metadata[2]
-        self.media_type = metadata[3]
-        self.creation_year = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
-        self.base_url = ''
-
-    def get_base_url(self, auth) -> int:
+    def update_base_url(self, auth) -> int:
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.get_access_token()}
         params = {'key': API_KEY}
-        response = requests.get(SRV_ENDPOINT +'mediaItems/' + self.object_id, params=params, headers=headers)
+        response = requests.get(SRV_ENDPOINT+'mediaItems/'+self.id, params=params, headers=headers)
         if response.status_code == 401:
             logging.error("Unauthorized.")
             return 1
         elif response.status_code == 404:
-            logging.warning(f"Item {self.object_id} not found on the server, removing from database.")
+            logging.warning(f"Item {self.id} not found on the server.")
             return 2
         elif response.status_code != 200:
             logging.error(f'Response code: {response.status_code}. Response: {response.text}')
@@ -124,9 +59,9 @@ class MediaFile:
     def download(self) -> int:
         logging.info('Start downloading a list of media items.')
         cur_db_connection = DB.cursor()
-        if 'image' in self.media_type:
+        if 'image' in self.mime_type:
             response = requests.get(self.base_url+'=d', params=None, headers=None)
-        elif 'video' in self.media_type:
+        elif 'video' in self.mime_type:
             response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
         else:
             logging.error('Unexpected error.')
@@ -140,7 +75,7 @@ class MediaFile:
             if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
                 logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                 f"in database.")
-                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.object_id,))
+                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                 DB.commit()
                 return 3
             media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')
@@ -151,7 +86,7 @@ class MediaFile:
             if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
                 logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                 f"in database.")
-                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.object_id,))
+                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                 DB.commit()
                 return 4
             media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')
@@ -162,13 +97,54 @@ class MediaFile:
             logging.error('Unexpected error.')
             return 5
         logging.info(f"Media file {self.filename} stored.")
-        cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.object_id,))
+        cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
         DB.commit()
         return 0
 
 
+class Listing:
+    def __init__(self):
+        self.list_one_page = []
+        self.new_next_page_token = None
+
+    def get_page(self, auth, page_token):
+        url = SRV_ENDPOINT + 'mediaItems'
+        objects_count_on_page = '100'
+        params = {'key': API_KEY,
+                  'pageSize': objects_count_on_page,
+                  'pageToken': page_token}
+        headers = {'Accept': 'application/json',
+                   'Authorization': 'Bearer ' + auth.get_access_token()}
+        response = requests.get(url, params=params, headers=headers)
+        if response.status_code == 401:
+            auth.refresh_access_token()
+            return 20
+        elif response.status_code != 200:
+            logging.warning(f"http code {response.status_code} when trying to get page of list with "
+                            f"next_page_token: {page_token}, response: {response.text}")
+            return 21
+        try:
+            self.list_one_page = response.json()['mediaItems']
+        except KeyError:
+            logging.warning(f"No mediaItems object in response. Response: {response.text}")
+            return 22
+        try:
+            self.new_next_page_token = response.json()['nextPageToken']
+        except KeyError:
+            logging.warning("No nextPageToken object in response. Probably got end of the list.")
+            self.new_next_page_token = None
+            return 23
+        return 0
+
+    def write_metadata(self) -> int:
+        for item in self.list_one_page:
+            media_item = MediaItem(item)
+            media_item.write_metadata_to_db()
+        return 0
+
+
 def main():
-    # Checking required paths.
+    # Checking required paths. TODO: do it as exceptions.
     if not os.path.exists(IDENTITY_FILE_PATH):
         print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
         exit(1)
@@ -180,19 +156,26 @@ def main():
         exit(3)
     logging.info('Started.')
     authorization = Authorization()
-    media_items_metadata = MediaItemsMetadata()
-    thread1 = Thread(target=media_items_metadata.get_from_server, args=(authorization,))
-    thread2 = Thread(target=media_items_metadata.write_to_db)
-    thread1.start()
-    time.sleep(10)
-    thread2.start()
-    thread1.join()
-    thread2.join()
+    media_items_list = Listing()
+    page = 0
+    while True:
+        next_page_token = media_items_list.new_next_page_token
+        result = media_items_list.get_page(authorization, next_page_token)
+        if result == 20:
+            continue
+        elif result == 23:
+            break
+        elif result != 0:
+            logging.error(f'Error. Code {result}.')
+            break
+        media_items_list.write_metadata()
+        page += 1
+        logging.info(f'{page} - processed.')
     DB.close()
     logging.info('Finished.')
     exit()
 
-
+'''
 def get_list_one_page(next_page_token, authorization, mode='fetch_all') -> tuple:
     """
     Gets one page of media objects list and puts metadata into the database.
@@ -271,7 +254,7 @@ def main_old():
         else:
             logging.error(f'Unexpected error. Returns code - {result}.')
             exit(7)
-
+'''
 
 if __name__ == '__main__':
     main()
