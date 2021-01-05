@@ -32,7 +32,7 @@ class MediaItem:
             DB.commit()
         except sqlite3.IntegrityError:
             logging.info(f"Media item {self.filename} already in the list.")
-            return 20
+            return 50
         return 0
 
     def update_base_url(self, auth) -> int:
@@ -106,13 +106,14 @@ class Listing:
     def __init__(self):
         self.list_one_page = []
         self.new_next_page_token = None
+        self.current_mode = ''
 
-    def get_page(self, auth, page_token):
+    def get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
         objects_count_on_page = '100'
         params = {'key': API_KEY,
                   'pageSize': objects_count_on_page,
-                  'pageToken': page_token}
+                  'pageToken': next_page_token}
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.get_access_token()}
         response = requests.get(url, params=params, headers=headers)
@@ -121,7 +122,7 @@ class Listing:
             return 20
         elif response.status_code != 200:
             logging.warning(f"http code {response.status_code} when trying to get page of list with "
-                            f"next_page_token: {page_token}, response: {response.text}")
+                            f"next_page_token: {next_page_token}, response: {response.text}")
             return 21
         try:
             self.list_one_page = response.json()['mediaItems']
@@ -136,11 +137,27 @@ class Listing:
             return 23
         return 0
 
-    def write_metadata(self) -> int:
+    def write_metadata(self, mode='write_all') -> int:
+        """
+        :param mode: 'write_all' or 'write_latest'
+        :return:
+        """
+        logging.info(f'Running in mode {mode}.')
         for item in self.list_one_page:
             media_item = MediaItem(item)
-            media_item.write_metadata_to_db()
+            result = media_item.write_metadata_to_db()
+            if result == 50 and mode == 'write_all':
+                continue
+            elif result == 50 and mode == 'write_latest':
+                return 51
         return 0
+
+    def check_mode(self):
+        cur_db_connection = DB.cursor()
+        cur_db_connection.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
+        DB.commit()
+        cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
+        self.current_mode = cur_db_connection.fetchone()[0]
 
 
 def main():
@@ -155,25 +172,42 @@ def main():
         print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
         exit(3)
     logging.info('Started.')
+    cur_db_connection = DB.cursor()
     authorization = Authorization()
-    media_items_list = Listing()
+    paginator = Listing()
+    paginator.check_mode()
     page = 0
+    list_retrieved = False
     while True:
-        next_page_token = media_items_list.new_next_page_token
-        result = media_items_list.get_page(authorization, next_page_token)
-        if result == 20:
+        next_page_token = paginator.new_next_page_token
+        paginator_output = paginator.get_page(authorization, next_page_token)
+        if paginator_output == 20:
             continue
-        elif result == 23:
+        elif paginator_output == 22 or paginator_output == 23:
+            list_retrieved = True
+        elif paginator_output != 0:
+            logging.error(f'Error. Code {paginator_output}.')
             break
-        elif result != 0:
-            logging.error(f'Error. Code {result}.')
+        if paginator.current_mode == '0':
+            paginator_output = paginator.write_metadata()
+        elif paginator.current_mode == '1':
+            paginator_output = paginator.write_metadata(mode='write_latest')
+        else:
+            logging.error('Unexpected error.')
+            exit(1)
+        if paginator_output == 51:
             break
-        media_items_list.write_metadata()
         page += 1
         logging.info(f'{page} - processed.')
+        if list_retrieved:
+            cur_db_connection.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+            DB.commit()
+            logging.warning("List has been retrieved.")
+            break
     DB.close()
     logging.info('Finished.')
     exit()
+
 
 '''
 def get_list_one_page(next_page_token, authorization, mode='fetch_all') -> tuple:
@@ -223,7 +257,6 @@ def get_media_files(authorization) -> int:
                 os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
                 logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
-    create_sub_folders_in_storage()
 
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + authorization.get_access_token()}
