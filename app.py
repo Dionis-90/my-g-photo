@@ -9,34 +9,38 @@ from authorization import *
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 DB = sqlite3.connect(DB_FILE_PATH)
+DB_CONNECTION = DB.cursor()
 
 
 class MediaItem:
+    """Creates media item object."""
     def __init__(self, item_id, mime_type, filename, creation_time):
         self.id = item_id
-        self.base_url = ''
+        self.base_url = None
         self.mime_type = mime_type
         self.filename = filename
         self.creation_time = creation_time
         self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
 
-    def write_metadata_to_db(self) -> int:
-        cur_db_connection = DB.cursor()
+    def write_metadata_to_db(self):
+        """
+        Writes metadata to database.
+        """
         values = (self.id, self.filename, self.mime_type, self.creation_time)
         try:
-            cur_db_connection.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
+            DB_CONNECTION.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
                     VALUES (?, ?, ?, ?)', values)
             DB.commit()
         except sqlite3.IntegrityError:
             logging.info(f"Media item {self.filename} already in the list.")
-            return 50
-        return 0
+            raise
 
     def remove_metadata_from_db(self):
-        cur_db_connection = DB.cursor()
-        logging.warning(f"Item {self.filename} not found on the server, removing from database.")
-        cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (self.id,))
-        DB.commit()
+        try:
+            DB_CONNECTION.execute("DELETE FROM my_media WHERE object_id=?", (self.id,))
+            DB.commit()
+        except sqlite3.Error as err:
+            logging.error(f'Fail to remove {self.filename} from the DB. Error {err}')
 
     def update_base_url(self, auth) -> int:
         headers = {'Accept': 'application/json',
@@ -59,8 +63,7 @@ class MediaItem:
             return 4
         return 0
 
-    def download(self):
-        cur_db_connection = DB.cursor()
+    def download(self) -> int:
         sub_folder_name = str(self.creation_year)+'/'
 
         def download_photo_item() -> int:
@@ -72,7 +75,7 @@ class MediaItem:
                 if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
-                    cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
+                    DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     return 3
                 media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
@@ -82,11 +85,11 @@ class MediaItem:
                 logging.error('Unexpected content type.')
                 return 5
             logging.info(f"Media file {self.filename} stored.")
-            cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
+            DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
             return 0
 
-        def download_video_item():
+        def download_video_item() -> int:
             response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
             if 'text/html' in response.headers['Content-Type']:
                 logging.error(f"Error. Server returns: {response.text}")
@@ -95,7 +98,7 @@ class MediaItem:
                 if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
-                    cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
+                    DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     return 4
                 media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
@@ -106,21 +109,22 @@ class MediaItem:
                 logging.error('Unexpected content type.')
                 return 5
             logging.info(f"Media file {self.filename} stored.")
-            cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
+            DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
             return 0
 
         if 'image' in self.mime_type:
-            download_photo_item()
+            result = download_photo_item()
         elif 'video' in self.mime_type:
-            download_video_item()
+            result = download_video_item()
         else:
             logging.error('Unexpected mime type.')
             return 1
-        return 0
+        return result
 
 
 class Listing:
+    """Gets pages with media metadata from Google Photo server and writes it to the database."""
     def __init__(self):
         self.list_one_page = []
         self.new_next_page_token = None
@@ -155,36 +159,42 @@ class Listing:
             return 23
         return 0
 
-    def write_metadata(self, mode='write_all') -> int:
+    def write_metadata(self, mode='write_all'):
         """
         :param mode: 'write_all' or 'write_latest'
-        :return:
         """
         logging.info(f'Running in mode {mode}.')
         for item in self.list_one_page:
             media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
                                    item['mediaMetadata']['creationTime'])
-            result = media_item.write_metadata_to_db()
-            if result == 50 and mode == 'write_all':
-                continue
-            elif result == 50 and mode == 'write_latest':
-                return 51
-        return 0
+            try:
+                media_item.write_metadata_to_db()
+            except sqlite3.IntegrityError:
+                if mode == 'write_all':
+                    continue
+                elif mode == 'write_latest':
+                    raise
+                else:
+                    logging.error('Unexpected error.')
+                    exit(5)
 
     def check_mode(self):
-        cur_db_connection = DB.cursor()
-        cur_db_connection.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
-        DB.commit()
-        cur_db_connection.execute("SELECT value FROM account_info WHERE key='list_received'")
-        self.current_mode = cur_db_connection.fetchone()[0]
+        try:
+            DB_CONNECTION.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
+            DB.commit()
+            DB_CONNECTION.execute("SELECT value FROM account_info WHERE key='list_received'")
+        except sqlite3.Error as err:
+            logging.error(f'DB query failed, {err}.')
+        self.current_mode = DB_CONNECTION.fetchone()[0]
 
 
 class Downloader:
+    """Downloads media items that listed in the database."""
     def __init__(self):
-        cur_db_connection = DB.cursor()
-        cur_db_connection.execute(
-            "SELECT object_id, media_type, filename, creation_time FROM my_media WHERE stored = '0'")
-        self.selection = cur_db_connection.fetchall()
+        DB_CONNECTION.execute(
+            "SELECT object_id, media_type, filename, creation_time FROM my_media\
+             WHERE stored = '0' ORDER BY creation_time DESC")
+        self.selection = DB_CONNECTION.fetchall()
 
     def create_tree(self):
         sub_folders = set()
@@ -199,16 +209,23 @@ class Downloader:
                 os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
                 logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
-    def get_media_items(self, auth):
+    def get_media_items(self, auth) -> int:
         for item in self.selection:
             media_item = MediaItem(item[0], item[1], item[2], item[3])
             result = media_item.update_base_url(auth)
             if result == 2:
+                logging.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_metadata_from_db()
             elif result != 0:
                 logging.error(f'Fail to update base url by {item[2]}.')
-                return 1
-            media_item.download()
+                return result
+            result = media_item.download()
+            if result == 3 or result == 4:
+                continue
+            elif result != 0:
+                logging.error(f'Fail to download {item[2]}, returns {result}.')
+                return result
+        return 0
 
 
 def main():
@@ -220,7 +237,6 @@ def main():
         print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
         exit(3)
     logging.info('Started.')
-    cur_db_connection = DB.cursor()
     authorization = Authorization()
     paginator = Listing()
     paginator.check_mode()
@@ -237,18 +253,19 @@ def main():
             logging.error(f'Error. Code {paginator_output}.')
             break
         if paginator.current_mode == '0':
-            paginator_output = paginator.write_metadata()
+            paginator.write_metadata()
         elif paginator.current_mode == '1':
-            paginator_output = paginator.write_metadata(mode='write_latest')
+            try:
+                paginator.write_metadata(mode='write_latest')
+            except sqlite3.IntegrityError:
+                break
         else:
             logging.error('Unexpected error.')
             exit(1)
-        if paginator_output == 51:
-            break
         page += 1
         logging.info(f'{page} - processed.')
         if list_retrieved:
-            cur_db_connection.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+            DB_CONNECTION.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
             DB.commit()
             logging.warning("List has been retrieved.")
             break
@@ -258,86 +275,7 @@ def main():
     downloader.get_media_items(authorization)
     DB.close()
     logging.info('Finished.')
-    exit()
 
-
-'''
-def get_list_one_page(next_page_token, authorization, mode='fetch_all') -> tuple:
-    """
-    Gets one page of media objects list and puts metadata into the database.
-    :param
-        mode: 'fetch_all' - if media object meta info already in the DB tries to get whole page and returns 0,
-              'fetch_last' - returns 10 immediately if media object meta info already in the DB,
-        next_page_token: We receive this token in response after successful execution of this function.
-                         At the first run we need to set this as None.
-    :return: (exit_code, next_page_token):
-        exit_codes:
-             0 - Got page of list and nextPageToken successfully.
-            10 - Media object metadata already exists in database.
-            20 - Unexpected error.
-            21 - Not http 200 code when trying to get page of list.
-            22 - No mediaItems object in response.
-            23 - No nextPageToken object in response.
-            30 - http 401 code, the token may have expired.
-    """
-
-
-def get_media_files(authorization) -> int:
-    """
-    Downloads media files to media folders and marks 1 in 'stored' field.
-    If file already exist, marks it 2 in 'stored' field.
-    :return:
-        0 - success.
-        1 or 3 - unexpected error.
-        2 - server returns a text.
-        4 - http 401 code, the token may have expired.
-    """
-    cur_db_connection = DB.cursor()
-    cur_db_connection.execute("SELECT object_id, filename, media_type, creation_time FROM my_media WHERE stored = '0'")
-    selection = cur_db_connection.fetchall()
-
-    def create_sub_folders_in_storage():
-        sub_folders = set()
-        for item in selection:
-            year = datetime.datetime.strptime(item[0], "%Y-%m-%dT%H:%M:%SZ").year
-            sub_folders.add(str(year))
-        for item in sub_folders:
-            if not os.path.exists(PATH_TO_IMAGES_STORAGE + item):
-                os.makedirs(PATH_TO_IMAGES_STORAGE + item)
-                logging.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
-            if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
-                os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
-                logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
-
-
-    headers = {'Accept': 'application/json',
-               'Authorization': 'Bearer ' + authorization.get_access_token()}
-    params = {'key': API_KEY}
-    for item in selection:
-        response = requests.get(SRV_ENDPOINT+'mediaItems/'+item[0], params=params, headers=headers)
-        if response.status_code == 401:
-            return 4
-        elif response.status_code == 404:
-            
-            continue
-        base_url = response.json()['baseUrl']
-
-
-def main_old():
-    while True:
-        result = get_media_files(auth)
-        if result == 4:
-            auth.refresh_access_token()
-        elif result == 0:
-            logging.info("All media items stored.")
-            break
-        elif result != 0:
-            logging.error(f"Application error. Returns code - {result}.")
-            exit(6)
-        else:
-            logging.error(f'Unexpected error. Returns code - {result}.')
-            exit(7)
-'''
 
 if __name__ == '__main__':
     main()
