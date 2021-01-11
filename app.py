@@ -12,16 +12,13 @@ DB = sqlite3.connect(DB_FILE_PATH)
 
 
 class MediaItem:
-    def __init__(self, metadata):
-        self.metadata = metadata
-        self.id = metadata['id']
-        self.base_url = metadata['baseUrl']
-        self.mime_type = metadata['mimeType']
-        self.filename = metadata['filename']
-        self.creation_time = metadata['mediaMetadata']['creationTime']
-        self.creation_year = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
-        self.width = metadata['mediaMetadata']['width']
-        self.height = metadata['mediaMetadata']['height']
+    def __init__(self, item_id, mime_type, filename, creation_time):
+        self.id = item_id
+        self.base_url = ''
+        self.mime_type = mime_type
+        self.filename = filename
+        self.creation_time = creation_time
+        self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
 
     def write_metadata_to_db(self) -> int:
         cur_db_connection = DB.cursor()
@@ -34,6 +31,12 @@ class MediaItem:
             logging.info(f"Media item {self.filename} already in the list.")
             return 50
         return 0
+
+    def remove_metadata_from_db(self):
+        cur_db_connection = DB.cursor()
+        logging.warning(f"Item {self.filename} not found on the server, removing from database.")
+        cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (self.id,))
+        DB.commit()
 
     def update_base_url(self, auth) -> int:
         headers = {'Accept': 'application/json',
@@ -56,49 +59,64 @@ class MediaItem:
             return 4
         return 0
 
-    def download(self) -> int:
-        logging.info('Start downloading a list of media items.')
+    def download(self):
         cur_db_connection = DB.cursor()
-        if 'image' in self.mime_type:
-            response = requests.get(self.base_url+'=d', params=None, headers=None)
-        elif 'video' in self.mime_type:
-            response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
-        else:
-            logging.error('Unexpected error.')
-            return 1
         sub_folder_name = str(self.creation_year)+'/'
-        if 'text/html' in response.headers['Content-Type']:
-            logging.error(f"Error. Server returns: {response.text}")
-            return 2
-        elif 'image' in response.headers['Content-Type']:
-            os.makedirs(PATH_TO_IMAGES_STORAGE+sub_folder_name, exist_ok=True)
-            if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
-                logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
-                                f"in database.")
-                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
-                DB.commit()
-                return 3
-            media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')
-            media_file.write(response.content)
-            media_file.close()
-        elif 'video' in response.headers['Content-Type']:
-            os.makedirs(PATH_TO_VIDEOS_STORAGE+sub_folder_name, exist_ok=True)
-            if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
-                logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
-                                f"in database.")
-                cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
-                DB.commit()
-                return 4
-            media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')
-            for chunk in response.iter_content(chunk_size=1024):
-                media_file.write(chunk)
-            media_file.close()
+
+        def download_photo_item() -> int:
+            response = requests.get(self.base_url+'=d', params=None, headers=None)
+            if 'text/html' in response.headers['Content-Type']:
+                logging.error(f"Error. Server returns: {response.text}")
+                return 2
+            elif 'image' in response.headers['Content-Type']:
+                if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
+                    logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
+                                    f"in database.")
+                    cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
+                    DB.commit()
+                    return 3
+                media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
+                media_file.write(response.content)
+                media_file.close()
+            else:
+                logging.error('Unexpected content type.')
+                return 5
+            logging.info(f"Media file {self.filename} stored.")
+            cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
+            DB.commit()
+            return 0
+
+        def download_video_item():
+            response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
+            if 'text/html' in response.headers['Content-Type']:
+                logging.error(f"Error. Server returns: {response.text}")
+                return 2
+            if 'video' in response.headers['Content-Type']:
+                if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
+                    logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
+                                    f"in database.")
+                    cur_db_connection.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
+                    DB.commit()
+                    return 4
+                media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
+                for chunk in response.iter_content(chunk_size=1024):
+                    media_file.write(chunk)
+                media_file.close()
+            else:
+                logging.error('Unexpected content type.')
+                return 5
+            logging.info(f"Media file {self.filename} stored.")
+            cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
+            DB.commit()
+            return 0
+
+        if 'image' in self.mime_type:
+            download_photo_item()
+        elif 'video' in self.mime_type:
+            download_video_item()
         else:
-            logging.error('Unexpected error.')
-            return 5
-        logging.info(f"Media file {self.filename} stored.")
-        cur_db_connection.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
-        DB.commit()
+            logging.error('Unexpected mime type.')
+            return 1
         return 0
 
 
@@ -144,7 +162,8 @@ class Listing:
         """
         logging.info(f'Running in mode {mode}.')
         for item in self.list_one_page:
-            media_item = MediaItem(item)
+            media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
+                                   item['mediaMetadata']['creationTime'])
             result = media_item.write_metadata_to_db()
             if result == 50 and mode == 'write_all':
                 continue
@@ -160,11 +179,40 @@ class Listing:
         self.current_mode = cur_db_connection.fetchone()[0]
 
 
+class Downloader:
+    def __init__(self):
+        cur_db_connection = DB.cursor()
+        cur_db_connection.execute(
+            "SELECT object_id, media_type, filename, creation_time FROM my_media WHERE stored = '0'")
+        self.selection = cur_db_connection.fetchall()
+
+    def create_tree(self):
+        sub_folders = set()
+        for item in self.selection:
+            year = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
+            sub_folders.add(str(year))
+        for item in sub_folders:
+            if not os.path.exists(PATH_TO_IMAGES_STORAGE + item):
+                os.makedirs(PATH_TO_IMAGES_STORAGE + item)
+                logging.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
+            if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
+                os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
+                logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
+
+    def get_media_items(self, auth):
+        for item in self.selection:
+            media_item = MediaItem(item[0], item[1], item[2], item[3])
+            result = media_item.update_base_url(auth)
+            if result == 2:
+                media_item.remove_metadata_from_db()
+            elif result != 0:
+                logging.error(f'Fail to update base url by {item[2]}.')
+                return 1
+            media_item.download()
+
+
 def main():
     # Checking required paths. TODO: do it as exceptions.
-    if not os.path.exists(IDENTITY_FILE_PATH):
-        print(f"File {IDENTITY_FILE_PATH} does not exist! Please put the file in working directory.")
-        exit(1)
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
         print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
         exit(2)
@@ -204,6 +252,10 @@ def main():
             DB.commit()
             logging.warning("List has been retrieved.")
             break
+    logging.info('Start downloading a list of media items.')
+    downloader = Downloader()
+    downloader.create_tree()
+    downloader.get_media_items(authorization)
     DB.close()
     logging.info('Finished.')
     exit()
@@ -266,9 +318,7 @@ def get_media_files(authorization) -> int:
         if response.status_code == 401:
             return 4
         elif response.status_code == 404:
-            logging.warning(f"Item {item[1]} not found on the server, removing from database.")
-            cur_db_connection.execute("DELETE FROM my_media WHERE object_id=?", (item[0],))
-            DB.commit()
+            
             continue
         base_url = response.json()['baseUrl']
 

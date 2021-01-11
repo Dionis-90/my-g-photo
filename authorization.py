@@ -11,8 +11,12 @@ SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
 
 class Authorization:
     def __init__(self):
-        with open(IDENTITY_FILE_PATH) as file_data:
-            self.identity_data = json.load(file_data)['installed']
+        try:
+            with open(IDENTITY_FILE_PATH) as file_data:
+                self.identity_data = json.load(file_data)['installed']
+        except OSError as err:
+            logging.error(f'Error while reading {IDENTITY_FILE_PATH}, {err}')
+            exit(1)
         scopes_for_uri = ''
         for scope in SCOPES:
             scopes_for_uri += scope+'%20'
@@ -22,7 +26,7 @@ class Authorization:
             auth_result = self.authenticate()
             if auth_result != 0:
                 logging.error("Unexpected error.")
-                exit(1)
+                exit(2)
         with open(OAUTH2_FILE_PATH) as f:
             self.oauth2_data = json.load(f)
         self.access_token = self.oauth2_data['access_token']
@@ -40,8 +44,12 @@ class Authorization:
         if response.status_code != 200:
             logging.error(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
             return 1
-        with open(OAUTH2_FILE_PATH, 'w') as f:
-            json.dump(response.json(), f)
+        try:
+            with open(OAUTH2_FILE_PATH, 'w') as f:
+                json.dump(response.json(), f)
+        except OSError as err:
+            logging.error(f'Error while writing {OAUTH2_FILE_PATH}, {err}')
+            return 2
         logging.info("Authenticated successfully.")
         return 0
 
