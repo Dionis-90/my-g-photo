@@ -23,17 +23,13 @@ class MediaItem:
         self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
 
     def write_metadata_to_db(self):
-        """
-        Writes metadata to database.
-        """
         values = (self.id, self.filename, self.mime_type, self.creation_time)
         try:
             DB_CONNECTION.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) \
                     VALUES (?, ?, ?, ?)', values)
             DB.commit()
         except sqlite3.IntegrityError:
-            logging.info(f"Media item {self.filename} already in the list.")
-            raise
+            raise ObjAlreadyExists(f"Media item {self.filename} already in the DB.")
 
     def remove_metadata_from_db(self):
         try:
@@ -169,7 +165,7 @@ class Listing:
                                    item['mediaMetadata']['creationTime'])
             try:
                 media_item.write_metadata_to_db()
-            except sqlite3.IntegrityError:
+            except ObjAlreadyExists:
                 if mode == 'write_all':
                     continue
                 elif mode == 'write_latest':
@@ -228,6 +224,11 @@ class Downloader:
         return 0
 
 
+class ObjAlreadyExists(Exception):
+    def __init__(self, message):
+        logging.info(message)
+
+
 def main():
     # Checking required paths. TODO: do it as exceptions.
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
@@ -257,7 +258,7 @@ def main():
         elif paginator.current_mode == '1':
             try:
                 paginator.write_metadata(mode='write_latest')
-            except sqlite3.IntegrityError:
+            except ObjAlreadyExists:
                 break
         else:
             logging.error('Unexpected error.')
