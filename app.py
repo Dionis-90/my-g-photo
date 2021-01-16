@@ -13,7 +13,6 @@ DB_CONNECTION = DB.cursor()
 
 
 class MediaItem:
-    """Creates media item object."""
     def __init__(self, item_id, mime_type, filename, creation_time):
         self.id = item_id
         self.base_url = None
@@ -30,6 +29,8 @@ class MediaItem:
             DB.commit()
         except sqlite3.IntegrityError:
             raise ObjAlreadyExists(f"Media item {self.filename} already in the DB.")
+        except sqlite3.Error as err:
+            logging.error(f'Fail to write {self.filename} metadata into the DB. Error {err}')
 
     def remove_metadata_from_db(self):
         try:
@@ -38,85 +39,84 @@ class MediaItem:
         except sqlite3.Error as err:
             logging.error(f'Fail to remove {self.filename} from the DB. Error {err}')
 
-    def update_base_url(self, auth) -> int:
+    def update_base_url(self, auth):
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.get_access_token()}
         params = {'key': API_KEY}
         response = requests.get(SRV_ENDPOINT+'mediaItems/'+self.id, params=params, headers=headers)
         if response.status_code == 401:
-            logging.error("Unauthorized.")
-            return 1
+            raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
             logging.warning(f"Item {self.id} not found on the server.")
-            return 2
+            raise FileNotFoundError()
         elif response.status_code != 200:
             logging.error(f'Response code: {response.status_code}. Response: {response.text}')
-            return 3
+            raise Exception()
         try:
             self.base_url = response.json()['baseUrl']
         except KeyError:
             logging.error(f'Response does not contain baseUrl. Response: {response.text}')
-            return 4
-        return 0
+            raise
 
-    def download(self) -> int:
+    def download(self):
         sub_folder_name = str(self.creation_year)+'/'
 
-        def download_photo_item() -> int:
+        def download_photo_item():
             response = requests.get(self.base_url+'=d', params=None, headers=None)
             if 'text/html' in response.headers['Content-Type']:
-                logging.error(f"Error. Server returns: {response.text}")
-                return 2
+                raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             elif 'image' in response.headers['Content-Type']:
                 if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
-                    return 3
+                    raise FileExistsError()
                 media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
                 media_file.write(response.content)
                 media_file.close()
             else:
                 logging.error('Unexpected content type.')
-                return 5
+                raise Exception()
             logging.info(f"Media file {self.filename} stored.")
             DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
-            return 0
 
-        def download_video_item() -> int:
+        def download_video_item():
             response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
             if 'text/html' in response.headers['Content-Type']:
-                logging.error(f"Error. Server returns: {response.text}")
-                return 2
+                raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             if 'video' in response.headers['Content-Type']:
                 if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
-                    return 4
+                    raise FileExistsError()
                 media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
                 for chunk in response.iter_content(chunk_size=1024):
                     media_file.write(chunk)
                 media_file.close()
             else:
                 logging.error('Unexpected content type.')
-                return 5
+                raise Exception()
             logging.info(f"Media file {self.filename} stored.")
             DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
-            return 0
 
         if 'image' in self.mime_type:
-            result = download_photo_item()
+            try:
+                download_photo_item()
+            except Exception:
+                raise
         elif 'video' in self.mime_type:
-            result = download_video_item()
+            try:
+                download_video_item()
+            except Exception:
+                raise
         else:
             logging.error('Unexpected mime type.')
-            return 1
-        return result
+            raise Exception()
 
 
 class Listing:
@@ -126,7 +126,7 @@ class Listing:
         self.new_next_page_token = None
         self.current_mode = ''
 
-    def get_page(self, auth, next_page_token):
+    def get_page(self, auth, next_page_token):  # TODO make exceptions instead return
         url = SRV_ENDPOINT + 'mediaItems'
         objects_count_on_page = '100'
         params = {'key': API_KEY,
@@ -136,7 +136,6 @@ class Listing:
                    'Authorization': 'Bearer ' + auth.get_access_token()}
         response = requests.get(url, params=params, headers=headers)
         if response.status_code == 401:
-            auth.refresh_access_token()
             return 20
         elif response.status_code != 200:
             logging.warning(f"http code {response.status_code} when trying to get page of list with "
@@ -172,7 +171,7 @@ class Listing:
                     raise
                 else:
                     logging.error('Unexpected error.')
-                    exit(5)
+                    raise Exception()
 
     def check_mode(self):
         try:
@@ -181,6 +180,7 @@ class Listing:
             DB_CONNECTION.execute("SELECT value FROM account_info WHERE key='list_received'")
         except sqlite3.Error as err:
             logging.error(f'DB query failed, {err}.')
+            raise
         self.current_mode = DB_CONNECTION.fetchone()[0]
 
 
@@ -205,23 +205,27 @@ class Downloader:
                 os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
                 logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
-    def get_media_items(self, auth) -> int:
+    def get_media_items(self, auth):
         for item in self.selection:
             media_item = MediaItem(item[0], item[1], item[2], item[3])
-            result = media_item.update_base_url(auth)
-            if result == 2:
+            try:
+                media_item.update_base_url(auth)
+            except FileNotFoundError:
                 logging.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_metadata_from_db()
-            elif result != 0:
+            except SessionNotAuth:
+                auth.refresh_access_token()
+                media_item.update_base_url(auth)
+            except Exception:
                 logging.error(f'Fail to update base url by {item[2]}.')
-                return result
-            result = media_item.download()
-            if result == 3 or result == 4:
+                raise
+            try:
+                media_item.download()
+            except FileExistsError:
                 continue
-            elif result != 0:
-                logging.error(f'Fail to download {item[2]}, returns {result}.')
-                return result
-        return 0
+            except Exception:
+                logging.error(f'Fail to download {item[2]}.')
+                raise
 
 
 class ObjAlreadyExists(Exception):
@@ -229,8 +233,18 @@ class ObjAlreadyExists(Exception):
         logging.info(message)
 
 
+class SessionNotAuth(Exception):
+    def __init__(self, message):
+        logging.info(message)
+
+
+class DownloadError(Exception):
+    def __init__(self, message):
+        logging.warning(message)
+
+
 def main():
-    # Checking required paths. TODO: do it as exceptions.
+    # Checking required paths. TODO: do it as exceptions?
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
         print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
         exit(2)
@@ -239,25 +253,26 @@ def main():
         exit(3)
     logging.info('Started.')
     authorization = Authorization()
-    paginator = Listing()
-    paginator.check_mode()
+    listing = Listing()
+    listing.check_mode()
     page = 0
     list_retrieved = False
     while True:
-        next_page_token = paginator.new_next_page_token
-        paginator_output = paginator.get_page(authorization, next_page_token)
-        if paginator_output == 20:
+        next_page_token = listing.new_next_page_token
+        result = listing.get_page(authorization, next_page_token)
+        if result == 20:
+            authorization.refresh_access_token()
             continue
-        elif paginator_output == 22 or paginator_output == 23:
+        elif result == 22 or result == 23:
             list_retrieved = True
-        elif paginator_output != 0:
-            logging.error(f'Error. Code {paginator_output}.')
+        elif result != 0:
+            logging.error(f'Error. Code {result}.')
             break
-        if paginator.current_mode == '0':
-            paginator.write_metadata()
-        elif paginator.current_mode == '1':
+        if listing.current_mode == '0':
+            listing.write_metadata()
+        elif listing.current_mode == '1':
             try:
-                paginator.write_metadata(mode='write_latest')
+                listing.write_metadata(mode='write_latest')
             except ObjAlreadyExists:
                 break
         else:
@@ -273,8 +288,12 @@ def main():
     logging.info('Start downloading a list of media items.')
     downloader = Downloader()
     downloader.create_tree()
-    downloader.get_media_items(authorization)
-    DB.close()
+    try:
+        downloader.get_media_items(authorization)
+    except Exception as err:
+        logging.error(f"Fail to download media: {err}")
+    finally:
+        DB.close()
     logging.info('Finished.')
 
 
