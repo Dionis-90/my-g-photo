@@ -136,23 +136,19 @@ class Listing:
                    'Authorization': 'Bearer ' + auth.get_access_token()}
         response = requests.get(url, params=params, headers=headers)
         if response.status_code == 401:
-            return 20
+            raise SessionNotAuth("Unauthorized.")
         elif response.status_code != 200:
-            logging.warning(f"http code {response.status_code} when trying to get page of list with "
+            raise Exception(f"http code {response.status_code} when trying to get page of list with "
                             f"next_page_token: {next_page_token}, response: {response.text}")
-            return 21
         try:
             self.list_one_page = response.json()['mediaItems']
         except KeyError:
-            logging.warning(f"No mediaItems object in response. Response: {response.text}")
-            return 22
+            raise NoItemsInResp(f"No mediaItems object in response. Response: {response.text}")
         try:
             self.new_next_page_token = response.json()['nextPageToken']
         except KeyError:
-            logging.warning("No nextPageToken object in response. Probably got end of the list.")
             self.new_next_page_token = None
-            return 23
-        return 0
+            raise NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
 
     def write_metadata(self, mode='write_all'):
         """
@@ -243,6 +239,16 @@ class DownloadError(Exception):
         logging.warning(message)
 
 
+class NoItemsInResp(Exception):
+    def __init__(self, message):
+        logging.warning(message)
+
+
+class NoNextPageTokenInResp(Exception):
+    def __init__(self, message):
+        logging.warning(message)
+
+
 def main():
     # Checking required paths. TODO: do it as exceptions?
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
@@ -259,14 +265,17 @@ def main():
     list_retrieved = False
     while True:
         next_page_token = listing.new_next_page_token
-        result = listing.get_page(authorization, next_page_token)
-        if result == 20:
+        try:
+            listing.get_page(authorization, next_page_token)
+        except SessionNotAuth:
             authorization.refresh_access_token()
             continue
-        elif result == 22 or result == 23:
+        except NoItemsInResp:
             list_retrieved = True
-        elif result != 0:
-            logging.error(f'Error. Code {result}.')
+        except NoNextPageTokenInResp:
+            list_retrieved = True
+        except Exception:
+            logging.error(f'Unexpected error.')
             break
         if listing.current_mode == '0':
             listing.write_metadata()
