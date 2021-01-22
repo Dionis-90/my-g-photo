@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.7
 
-# This is a script that gets, downloads media files and metadata from your Google Photo storage to your local storage.
+# This is an application that gets, downloads media files and metadata from your Google Photo storage to your
+# local storage.
 
 import sqlite3
 import datetime
@@ -42,7 +43,7 @@ class MediaItem:
 
     def update_base_url(self, auth):
         headers = {'Accept': 'application/json',
-                   'Authorization': 'Bearer ' + auth.get_access_token()}
+                   'Authorization': 'Bearer ' + auth.access_token}
         params = {'key': API_KEY}
         response = requests.get(SRV_ENDPOINT+'mediaItems/'+self.id, params=params, headers=headers)
         if response.status_code == 401:
@@ -134,7 +135,7 @@ class Listing:
                   'pageSize': objects_count_on_page,
                   'pageToken': next_page_token}
         headers = {'Accept': 'application/json',
-                   'Authorization': 'Bearer ' + auth.get_access_token()}
+                   'Authorization': 'Bearer ' + auth.access_token}
         response = requests.get(url, params=params, headers=headers)
         if response.status_code == 401:
             raise SessionNotAuth("Unauthorized.")
@@ -196,10 +197,18 @@ class Downloader:
             sub_folders.add(str(year))
         for item in sub_folders:
             if not os.path.exists(PATH_TO_IMAGES_STORAGE + item):
-                os.makedirs(PATH_TO_IMAGES_STORAGE + item)
+                try:
+                    os.makedirs(PATH_TO_IMAGES_STORAGE + item)
+                except OSError as err:
+                    logging.error(f"Fail to create folder, {err}")
+                    raise
                 logging.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
             if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
-                os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
+                try:
+                    os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
+                except OSError as err:
+                    logging.error(f"Fail to create folder, {err}")
+                    raise
                 logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def get_media_items(self, auth):
@@ -265,14 +274,21 @@ class Paginator:
 
 
 def main():
-    # Checking required paths. TODO: do it as exceptions?
-    if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
-        print(f"Path {PATH_TO_VIDEOS_STORAGE} does not exist! Please set correct path.")
-        exit(2)
-    if not os.path.exists(PATH_TO_IMAGES_STORAGE):
-        print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
-        exit(3)
     authorization = Authorization()
+    try:
+        authorization.get_tokens()
+    except FileNotFoundError:
+        try:
+            authorization.authenticate()
+        except Exception as err:
+            logging.error(f"Fail to authenticate, {err}")
+            exit(5)
+    except OSError as err:
+        logging.error(f"Fail to authenticate, {err}")
+        exit(6)
+    except KeyError:
+        logging.error("Fail to authenticate.")
+        exit(4)
     logging.info('Started.')
     paginator = Paginator(authorization)
     try:
@@ -283,11 +299,16 @@ def main():
         exit(1)
     logging.info('Start downloading a list of media items.')
     downloader = Downloader()
-    downloader.create_tree()
+    try:
+        downloader.create_tree()
+    except OSError:
+        logging.error("Please check storage paths in config.")
+        exit(2)
     try:
         downloader.get_media_items(authorization)
     except Exception as err:
         logging.error(f"Fail to download media: {err}")
+        exit(3)
     finally:
         DB.close()
     logging.info('Finished.')
