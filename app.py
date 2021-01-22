@@ -5,6 +5,7 @@
 import sqlite3
 import datetime
 from authorization import *
+from exceptions import *
 
 # Define constants
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
@@ -126,7 +127,7 @@ class Listing:
         self.new_next_page_token = None
         self.current_mode = ''
 
-    def get_page(self, auth, next_page_token):  # TODO make exceptions instead return
+    def get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
         objects_count_on_page = '100'
         params = {'key': API_KEY,
@@ -261,36 +262,6 @@ class Paginator:
                 DB.commit()
                 logging.warning("List has been retrieved.")
                 break
-
-
-class ObjAlreadyExists(Exception):
-    def __init__(self, message):
-        logging.info(message)
-
-
-class SessionNotAuth(Exception):
-    def __init__(self, message):
-        logging.warning(message)
-
-
-class DownloadError(Exception):
-    def __init__(self, message):
-        logging.error(message)
-
-
-class NoItemsInResp(Exception):
-    def __init__(self, message):
-        logging.warning(message)
-
-
-class NoNextPageTokenInResp(Exception):
-    def __init__(self, message):
-        logging.warning(message)
-
-
-class FailGettingPage(Exception):
-    def __init__(self, message):
-        logging.error(message)
 
 
 def main():
