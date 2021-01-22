@@ -138,8 +138,8 @@ class Listing:
         if response.status_code == 401:
             raise SessionNotAuth("Unauthorized.")
         elif response.status_code != 200:
-            raise Exception(f"http code {response.status_code} when trying to get page of list with "
-                            f"next_page_token: {next_page_token}, response: {response.text}")
+            raise FailGettingPage(f"http code {response.status_code} when trying to get page of list with "
+                                  f"next_page_token: {next_page_token}, response: {response.text}")
         try:
             self.list_one_page = response.json()['mediaItems']
         except KeyError:
@@ -224,6 +224,45 @@ class Downloader:
                 raise
 
 
+class Paginator:
+    def __init__(self, auth):
+        self.auth = auth
+        self.listing = Listing()
+        self.listing.check_mode()
+        self.list_retrieved = False
+
+    def get_whole_media_list(self):
+        page = 0
+        while True:
+            next_page_token = self.listing.new_next_page_token
+            try:
+                self.listing.get_page(self.auth, next_page_token)
+            except SessionNotAuth:
+                self.auth.refresh_access_token()
+                continue
+            except NoItemsInResp or NoNextPageTokenInResp:
+                self.list_retrieved = True
+            except FailGettingPage:
+                break
+            if self.listing.current_mode == '0':
+                self.listing.write_metadata()
+            elif self.listing.current_mode == '1':
+                try:
+                    self.listing.write_metadata(mode='write_latest')
+                except ObjAlreadyExists:
+                    break
+            else:
+                logging.error('Unexpected error.')
+                raise Exception()
+            page += 1
+            logging.info(f'{page} - processed.')
+            if self.list_retrieved:
+                DB_CONNECTION.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+                DB.commit()
+                logging.warning("List has been retrieved.")
+                break
+
+
 class ObjAlreadyExists(Exception):
     def __init__(self, message):
         logging.info(message)
@@ -231,12 +270,12 @@ class ObjAlreadyExists(Exception):
 
 class SessionNotAuth(Exception):
     def __init__(self, message):
-        logging.info(message)
+        logging.warning(message)
 
 
 class DownloadError(Exception):
     def __init__(self, message):
-        logging.warning(message)
+        logging.error(message)
 
 
 class NoItemsInResp(Exception):
@@ -249,6 +288,11 @@ class NoNextPageTokenInResp(Exception):
         logging.warning(message)
 
 
+class FailGettingPage(Exception):
+    def __init__(self, message):
+        logging.error(message)
+
+
 def main():
     # Checking required paths. TODO: do it as exceptions?
     if not os.path.exists(PATH_TO_VIDEOS_STORAGE):
@@ -257,43 +301,15 @@ def main():
     if not os.path.exists(PATH_TO_IMAGES_STORAGE):
         print(f"Path {PATH_TO_IMAGES_STORAGE} does not exist! Please set correct path.")
         exit(3)
-    logging.info('Started.')
     authorization = Authorization()
-    listing = Listing()
-    listing.check_mode()
-    page = 0
-    list_retrieved = False
-    while True:
-        next_page_token = listing.new_next_page_token
-        try:
-            listing.get_page(authorization, next_page_token)
-        except SessionNotAuth:
-            authorization.refresh_access_token()
-            continue
-        except NoItemsInResp:
-            list_retrieved = True
-        except NoNextPageTokenInResp:
-            list_retrieved = True
-        except Exception:
-            logging.error(f'Unexpected error.')
-            break
-        if listing.current_mode == '0':
-            listing.write_metadata()
-        elif listing.current_mode == '1':
-            try:
-                listing.write_metadata(mode='write_latest')
-            except ObjAlreadyExists:
-                break
-        else:
-            logging.error('Unexpected error.')
-            exit(1)
-        page += 1
-        logging.info(f'{page} - processed.')
-        if list_retrieved:
-            DB_CONNECTION.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
-            DB.commit()
-            logging.warning("List has been retrieved.")
-            break
+    logging.info('Started.')
+    paginator = Paginator(authorization)
+    try:
+        paginator.get_whole_media_list()
+    except Exception as err:
+        logging.error(f"Unexpected error, {err}")
+        DB.close()
+        exit(1)
     logging.info('Start downloading a list of media items.')
     downloader = Downloader()
     downloader.create_tree()
