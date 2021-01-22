@@ -156,7 +156,6 @@ class Listing:
         """
         :param mode: 'write_all' or 'write_latest'
         """
-        logging.info(f'Running in mode {mode}.')
         for item in self.list_one_page:
             media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
                                    item['mediaMetadata']['creationTime'])
@@ -242,6 +241,7 @@ class Paginator:
         self.list_retrieved = False
 
     def get_whole_media_list(self):
+        logging.warning(f'Running in mode {self.listing.current_mode}.')
         page = 0
         while True:
             next_page_token = self.listing.new_next_page_token
@@ -250,7 +250,9 @@ class Paginator:
             except SessionNotAuth:
                 self.auth.refresh_access_token()
                 continue
-            except NoItemsInResp or NoNextPageTokenInResp:
+            except NoItemsInResp:
+                self.list_retrieved = True
+            except NoNextPageTokenInResp:
                 self.list_retrieved = True
             except FailGettingPage:
                 break

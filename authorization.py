@@ -83,7 +83,11 @@ class Authorization:
                   'refresh_token': self.refresh_token,
                   'grant_type': 'refresh_token'}
         response = requests.post(self.identity_data['token_uri'], data=values)
-        with open(ACCESS_TOKEN_FILE, 'w') as f:
-            json.dump(response.json(), f)
+        try:
+            with open(ACCESS_TOKEN_FILE, 'w') as f:
+                json.dump(response.json(), f)
+        except OSError as err:
+            logging.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
+            raise
         self.access_token = response.json()['access_token']
         logging.info('Token has been refreshed.')
