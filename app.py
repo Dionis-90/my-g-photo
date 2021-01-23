@@ -275,46 +275,49 @@ class Paginator:
                 break
 
 
-def main():
-    authorization = Authorization()
-    try:
-        authorization.get_tokens()
-    except FileNotFoundError:
+class Runtime:
+    def __init__(self):
+        logging.info('Started.')
+        self.authorization = Authorization()
         try:
-            authorization.authenticate()
-        except Exception as err:
+            self.authorization.get_tokens()
+        except FileNotFoundError:
+            try:
+                self.authorization.authenticate()
+            except Exception as err:
+                logging.error(f"Fail to authenticate, {err}")
+                exit(5)
+        except OSError as err:
             logging.error(f"Fail to authenticate, {err}")
-            exit(5)
-    except OSError as err:
-        logging.error(f"Fail to authenticate, {err}")
-        exit(6)
-    except KeyError:
-        logging.error("Fail to authenticate.")
-        exit(4)
-    logging.info('Started.')
-    paginator = Paginator(authorization)
-    try:
-        paginator.get_whole_media_list()
-    except Exception as err:
-        logging.error(f"Unexpected error, {err}")
-        DB.close()
-        exit(1)
-    logging.info('Start downloading a list of media items.')
-    downloader = Downloader()
-    try:
-        downloader.create_tree()
-    except OSError:
-        logging.error("Please check storage paths in config.")
-        exit(2)
-    try:
-        downloader.get_media_items(authorization)
-    except Exception as err:
-        logging.error(f"Fail to download media: {err}")
-        exit(3)
-    finally:
-        DB.close()
-    logging.info('Finished.')
+            exit(6)
+        except KeyError:
+            logging.error("Fail to authenticate.")
+            exit(4)
+
+    def main(self):
+        paginator = Paginator(self.authorization)
+        try:
+            paginator.get_whole_media_list()
+        except Exception as err:
+            logging.error(f"Unexpected error, {err}")
+            DB.close()
+            exit(1)
+        logging.info('Start downloading a list of media items.')
+        downloader = Downloader()
+        try:
+            downloader.create_tree()
+        except OSError:
+            logging.error("Please check storage paths in config.")
+            exit(2)
+        try:
+            downloader.get_media_items(self.authorization)
+        except Exception as err:
+            logging.error(f"Fail to download media: {err}")
+            exit(3)
+        finally:
+            DB.close()
+        logging.info('Finished.')
 
 
 if __name__ == '__main__':
-    main()
+    Runtime().main()
