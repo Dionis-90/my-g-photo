@@ -41,7 +41,7 @@ class MediaItem:
         except sqlite3.Error as err:
             logging.error(f'Fail to remove {self.filename} from the DB. Error {err}')
 
-    def update_base_url(self, auth):
+    def get_base_url(self, auth):
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
         params = {'key': API_KEY}
@@ -74,9 +74,12 @@ class MediaItem:
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
-                media_file = open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
-                media_file.write(response.content)
-                media_file.close()
+                try:
+                    with open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb') as media_file:
+                        media_file.write(response.content)
+                except OSError as err:
+                    logging.warning(f"Fail to download {self.filename} photo, {err}")
+                    raise
             else:
                 logging.error('Unexpected content type.')
                 raise Exception()
@@ -95,10 +98,13 @@ class MediaItem:
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
-                media_file = open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb')  # TODO:use try-except
-                for chunk in response.iter_content(chunk_size=1024):
-                    media_file.write(chunk)
-                media_file.close()
+                try:
+                    with open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb') as media_file:
+                        for chunk in response.iter_content(chunk_size=1024):
+                            media_file.write(chunk)
+                except OSError as err:
+                    logging.warning(f"Fail to download {self.filename} video, {err}")
+                    raise
             else:
                 logging.error('Unexpected content type.')
                 raise Exception()
@@ -120,8 +126,21 @@ class MediaItem:
             logging.error('Unexpected mime type.')
             raise Exception()
 
+    def remove_from_local(self):
+        if 'video' in self.mime_type:
+            path = PATH_TO_VIDEOS_STORAGE+str(self.creation_year)+'/'+self.filename
+        elif 'image' in self.mime_type:
+            path = PATH_TO_IMAGES_STORAGE+str(self.creation_year)+'/'+self.filename
+        else:
+            logging.error("Unexpected error.")
+            raise Exception()
+        try:
+            os.remove(path)
+        except OSError as err:
+            logging.error(f"Fail to remove {self.filename}, {err}")
 
-class Listing:
+
+class MetadataHandler:
     """Gets pages with media metadata from Google Photo server and writes it to the database."""
     def __init__(self):
         self.list_one_page = []
@@ -152,7 +171,7 @@ class Listing:
             self.new_next_page_token = None
             raise NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
 
-    def write_metadata(self, mode='write_all'):
+    def write_page(self, mode='write_all'):
         """
         :param mode: 'write_all' or 'write_latest'
         """
@@ -181,17 +200,17 @@ class Listing:
         self.current_mode = DB_CONNECTION.fetchone()[0]
 
 
-class Downloader:
+class LocalStoreHandler:
     """Downloads media items that listed in the database."""
     def __init__(self):
         DB_CONNECTION.execute(
             "SELECT object_id, media_type, filename, creation_time FROM my_media\
              WHERE stored = '0' ORDER BY creation_time DESC")
-        self.selection = DB_CONNECTION.fetchall()
+        self.download_selection = DB_CONNECTION.fetchall()
 
     def create_tree(self):
         sub_folders = set()
-        for item in self.selection:
+        for item in self.download_selection:
             year = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
             sub_folders.add(str(year))
         for item in sub_folders:
@@ -211,16 +230,17 @@ class Downloader:
                 logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def get_media_items(self, auth):
-        for item in self.selection:
+        for item in self.download_selection:
             media_item = MediaItem(item[0], item[1], item[2], item[3])
             try:
-                media_item.update_base_url(auth)
+                media_item.get_base_url(auth)
             except FileNotFoundError:
                 logging.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_metadata_from_db()
+                continue
             except SessionNotAuth:
                 auth.refresh_access_token()
-                media_item.update_base_url(auth)
+                media_item.get_base_url(auth)
             except Exception:
                 logging.error(f'Fail to update base url by {item[2]}.')
                 raise
@@ -228,15 +248,14 @@ class Downloader:
                 media_item.download()
             except FileExistsError:
                 continue
-            except Exception:
-                logging.error(f'Fail to download {item[2]}.')
-                raise
+            except OSError:
+                continue
 
 
 class Paginator:
     def __init__(self, auth):
         self.auth = auth
-        self.listing = Listing()
+        self.listing = MetadataHandler()
         self.listing.check_mode()
         self.list_retrieved = False
 
@@ -257,10 +276,10 @@ class Paginator:
             except FailGettingPage:
                 break
             if self.listing.current_mode == '0':
-                self.listing.write_metadata()
+                self.listing.write_page()
             elif self.listing.current_mode == '1':
                 try:
-                    self.listing.write_metadata(mode='write_latest')
+                    self.listing.write_page(mode='write_latest')
                 except ObjAlreadyExists:
                     break
             else:
@@ -273,6 +292,25 @@ class Paginator:
                 DB.commit()
                 logging.warning("List has been retrieved.")
                 break
+
+
+class LocalDBActualization:
+    def __init__(self, auth):
+        DB_CONNECTION.execute(
+            "SELECT object_id, media_type, filename, creation_time FROM my_media\
+             WHERE stored != '0' ORDER BY creation_time DESC")
+        self.local_metadata_selection = DB_CONNECTION.fetchall()
+        self.auth = auth
+
+    def find_not_existing(self):
+        for item in self.local_metadata_selection:
+            media_item = MediaItem(*item)
+            try:
+                media_item.get_base_url(self.auth)
+            except FileNotFoundError:
+                media_item.remove_from_local()
+                media_item.remove_metadata_from_db()
+                logging.info(f"{media_item.filename} removed from local and db.")
 
 
 class Runtime:
@@ -303,7 +341,7 @@ class Runtime:
             DB.close()
             exit(1)
         logging.info('Start downloading a list of media items.')
-        downloader = Downloader()
+        downloader = LocalStoreHandler()
         try:
             downloader.create_tree()
         except OSError:
@@ -314,6 +352,16 @@ class Runtime:
         except Exception as err:
             logging.error(f"Fail to download media: {err}")
             exit(3)
+        except KeyboardInterrupt:
+            logging.warning("Aborted by user.")
+        db_actualization = LocalDBActualization(self.authorization)
+        try:
+            db_actualization.find_not_existing()
+        except Exception as err:
+            logging.error(f"Fail to actualize DB, {err}")
+            exit(8)
+        except KeyboardInterrupt:
+            logging.warning("Aborted by user.")
         finally:
             DB.close()
         logging.info('Finished.')
