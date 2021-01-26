@@ -22,7 +22,7 @@ class MediaItem:
         self.filename = filename
         self.creation_time = creation_time
         self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
-        self.sub_folder_name = str(self.creation_year)+'/'
+        self.sub_folder_name = str(self.creation_year) + '/'
 
     def write_metadata_to_db(self):
         values = (self.id, self.filename, self.mime_type, self.creation_time)
@@ -46,7 +46,7 @@ class MediaItem:
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
         params = {'key': API_KEY}
-        response = requests.get(SRV_ENDPOINT+'mediaItems/'+self.id, params=params, headers=headers)
+        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, params=params, headers=headers)
         if response.status_code == 401:
             raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
@@ -64,7 +64,7 @@ class MediaItem:
     def download(self):
 
         def download_photo_item():
-            response = requests.get(self.base_url+'=d', params=None, headers=None)
+            response = requests.get(self.base_url + '=d', params=None, headers=None)
             if 'text/html' in response.headers['Content-Type']:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             elif 'image' in response.headers['Content-Type']:
@@ -88,7 +88,7 @@ class MediaItem:
             DB.commit()
 
         def download_video_item():
-            response = requests.get(self.base_url+'=dv', params=None, headers=None, stream=True)
+            response = requests.get(self.base_url + '=dv', params=None, headers=None, stream=True)
             if 'text/html' in response.headers['Content-Type']:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             if 'video' in response.headers['Content-Type']:
@@ -128,9 +128,9 @@ class MediaItem:
 
     def remove_from_local(self):
         if 'video' in self.mime_type:
-            path_to_file = PATH_TO_VIDEOS_STORAGE+self.sub_folder_name+self.filename
+            path_to_file = PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename
         elif 'image' in self.mime_type:
-            path_to_file = PATH_TO_IMAGES_STORAGE+self.sub_folder_name+self.filename
+            path_to_file = PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename
         else:
             logging.error("Unexpected error.")
             raise Exception()
@@ -142,6 +142,7 @@ class MediaItem:
 
 class MetadataHandler:
     """Gets pages with media metadata from Google Photo server and writes it to the database."""
+
     def __init__(self):
         self.list_one_page = []
         self.new_next_page_token = None
@@ -202,6 +203,7 @@ class MetadataHandler:
 
 class LocalStoreHandler:
     """Downloads media items that listed in the database."""
+
     def __init__(self):
         DB_CONNECTION.execute(
             "SELECT object_id, media_type, filename, creation_time FROM my_media\
@@ -296,10 +298,19 @@ class Paginator:
 
 class LocalDBActualization:
     def __init__(self, auth):
-        DB_CONNECTION.execute(
-            "SELECT object_id, media_type, filename, creation_time FROM my_media\
-             WHERE stored != '0' ORDER BY creation_time DESC")
+        DB_CONNECTION.execute("SELECT value FROM account_info WHERE key = 'last_processed_object_id'")
+        self.last_local_id_processed = DB_CONNECTION.fetchall()
+        if not self.last_local_id_processed:
+            DB_CONNECTION.execute(
+                "SELECT object_id, media_type, filename, creation_time FROM my_media\
+                WHERE stored != '0' ORDER BY id")
+        else:
+            DB_CONNECTION.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE \
+                stored != '0' and id > (SELECT id FROM my_media WHERE object_id = ?) ORDER BY id",
+                                  self.last_local_id_processed[0])
         self.local_metadata_selection = DB_CONNECTION.fetchall()
+        DB_CONNECTION.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
+        DB.commit()
         self.auth = auth
 
     def find_not_existing(self):
@@ -311,6 +322,11 @@ class LocalDBActualization:
                 media_item.remove_from_local()
                 media_item.remove_metadata_from_db()
                 logging.info(f"{media_item.filename} removed from local and db.")
+            except (Exception, KeyboardInterrupt):
+                DB_CONNECTION.execute("INSERT INTO account_info (key, value) \
+                    VALUES('last_processed_object_id', ?)", (media_item.id,))
+                DB.commit()
+                raise
 
 
 class Runtime:
