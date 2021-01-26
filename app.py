@@ -22,6 +22,7 @@ class MediaItem:
         self.filename = filename
         self.creation_time = creation_time
         self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
+        self.sub_folder_name = str(self.creation_year)+'/'
 
     def write_metadata_to_db(self):
         values = (self.id, self.filename, self.mime_type, self.creation_time)
@@ -61,21 +62,20 @@ class MediaItem:
             raise
 
     def download(self):
-        sub_folder_name = str(self.creation_year)+'/'
 
         def download_photo_item():
             response = requests.get(self.base_url+'=d', params=None, headers=None)
             if 'text/html' in response.headers['Content-Type']:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             elif 'image' in response.headers['Content-Type']:
-                if os.path.exists(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename):
+                if os.path.exists(PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
                 try:
-                    with open(PATH_TO_IMAGES_STORAGE + sub_folder_name + self.filename, 'wb') as media_file:
+                    with open(PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename, 'wb') as media_file:
                         media_file.write(response.content)
                 except OSError as err:
                     logging.warning(f"Fail to download {self.filename} photo, {err}")
@@ -92,14 +92,14 @@ class MediaItem:
             if 'text/html' in response.headers['Content-Type']:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             if 'video' in response.headers['Content-Type']:
-                if os.path.exists(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename):
+                if os.path.exists(PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename):
                     logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
                 try:
-                    with open(PATH_TO_VIDEOS_STORAGE + sub_folder_name + self.filename, 'wb') as media_file:
+                    with open(PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename, 'wb') as media_file:
                         for chunk in response.iter_content(chunk_size=1024):
                             media_file.write(chunk)
                 except OSError as err:
@@ -128,14 +128,14 @@ class MediaItem:
 
     def remove_from_local(self):
         if 'video' in self.mime_type:
-            path = PATH_TO_VIDEOS_STORAGE+str(self.creation_year)+'/'+self.filename
+            path_to_file = PATH_TO_VIDEOS_STORAGE+self.sub_folder_name+self.filename
         elif 'image' in self.mime_type:
-            path = PATH_TO_IMAGES_STORAGE+str(self.creation_year)+'/'+self.filename
+            path_to_file = PATH_TO_IMAGES_STORAGE+self.sub_folder_name+self.filename
         else:
             logging.error("Unexpected error.")
             raise Exception()
         try:
-            os.remove(path)
+            os.remove(path_to_file)
         except OSError as err:
             logging.error(f"Fail to remove {self.filename}, {err}")
 
@@ -231,7 +231,7 @@ class LocalStoreHandler:
 
     def get_media_items(self, auth):
         for item in self.download_selection:
-            media_item = MediaItem(item[0], item[1], item[2], item[3])
+            media_item = MediaItem(*item)
             try:
                 media_item.get_base_url(auth)
             except FileNotFoundError:
@@ -354,6 +354,7 @@ class Runtime:
             exit(3)
         except KeyboardInterrupt:
             logging.warning("Aborted by user.")
+        logging.info("Start DB and local storage actualization.")
         db_actualization = LocalDBActualization(self.authorization)
         try:
             db_actualization.find_not_existing()
