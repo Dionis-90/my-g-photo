@@ -42,7 +42,7 @@ class MediaItem:
         except sqlite3.Error as err:
             logging.error(f'Fail to remove {self.filename} from the DB. Error {err}')
 
-    def get_base_url(self, auth):
+    def get_base_url(self, auth):  # TODO: Check if video object first
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
         params = {'key': API_KEY}
@@ -138,6 +138,21 @@ class MediaItem:
             os.remove(path_to_file)
         except OSError as err:
             logging.error(f"Fail to remove {self.filename}, {err}")
+
+    def is_exist_on_server(self, auth) -> bool:
+        headers = {'Accept': 'application/json',
+                   'Authorization': 'Bearer ' + auth.access_token}
+        params = {'key': API_KEY}
+        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, params=params, headers=headers)
+        if response.status_code == 401:
+            raise SessionNotAuth("Session unauthorized.")
+        elif response.status_code == 404:
+            logging.warning(f"Item {self.id} not found on the server.")
+            return False
+        elif response.status_code != 200:
+            logging.error(f'Response code: {response.status_code}. Response: {response.text}')
+            raise Exception()
+        return True
 
 
 class MetadataHandler:
@@ -271,9 +286,7 @@ class Paginator:
             except SessionNotAuth:
                 self.auth.refresh_access_token()
                 continue
-            except NoItemsInResp:
-                self.list_retrieved = True
-            except NoNextPageTokenInResp:
+            except (NoNextPageTokenInResp, NoItemsInResp):
                 self.list_retrieved = True
             except FailGettingPage:
                 break
@@ -317,16 +330,25 @@ class LocalDBActualization:
         for item in self.local_metadata_selection:
             media_item = MediaItem(*item)
             try:
-                media_item.get_base_url(self.auth)
-            except FileNotFoundError:
-                media_item.remove_from_local()
-                media_item.remove_metadata_from_db()
-                logging.info(f"{media_item.filename} removed from local and db.")
+                result = media_item.is_exist_on_server(self.auth)
+            except SessionNotAuth:
+                self.auth.refresh_access_token()
+                try:
+                    result = media_item.is_exist_on_server(self.auth)
+                except (Exception, KeyboardInterrupt):
+                    DB_CONNECTION.execute("INSERT INTO account_info (key, value) \
+                        VALUES('last_processed_object_id', ?)", (media_item.id,))
+                    DB.commit()
+                    raise
             except (Exception, KeyboardInterrupt):
                 DB_CONNECTION.execute("INSERT INTO account_info (key, value) \
                     VALUES('last_processed_object_id', ?)", (media_item.id,))
                 DB.commit()
                 raise
+            if not result:
+                media_item.remove_from_local()
+                media_item.remove_metadata_from_db()
+                logging.info(f"{media_item.filename} removed from local and db.")
 
 
 class Runtime:
