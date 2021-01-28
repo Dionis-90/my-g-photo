@@ -23,6 +23,7 @@ class MediaItem:
         self.creation_time = creation_time
         self.creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
         self.sub_folder_name = str(self.creation_year) + '/'
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def write_metadata_to_db(self):
         values = (self.id, self.filename, self.mime_type, self.creation_time)
@@ -33,14 +34,14 @@ class MediaItem:
         except sqlite3.IntegrityError:
             raise ObjAlreadyExists(f"Media item {self.filename} already in the DB.")
         except sqlite3.Error as err:
-            logging.error(f'Fail to write {self.filename} metadata into the DB. Error {err}')
+            self.logger.error(f'Fail to write {self.filename} metadata into the DB. Error {err}')
 
     def remove_metadata_from_db(self):
         try:
             DB_CONNECTION.execute("DELETE FROM my_media WHERE object_id=?", (self.id,))
             DB.commit()
         except sqlite3.Error as err:
-            logging.error(f'Fail to remove {self.filename} from the DB. Error {err}')
+            self.logger.error(f'Fail to remove {self.filename} from the DB. Error {err}')
 
     def get_base_url(self, auth):  # TODO: Check if video object first
         headers = {'Accept': 'application/json',
@@ -50,15 +51,14 @@ class MediaItem:
         if response.status_code == 401:
             raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
-            logging.warning(f"Item {self.id} not found on the server.")
+            self.logger.warning(f"Item {self.id} not found on the server.")
             raise FileNotFoundError()
         elif response.status_code != 200:
-            logging.error(f'Response code: {response.status_code}. Response: {response.text}')
-            raise Exception()
+            raise Exception(f'Response code: {response.status_code}. Response: {response.text}')
         try:
             self.base_url = response.json()['baseUrl']
         except KeyError:
-            logging.error(f'Response does not contain baseUrl. Response: {response.text}')
+            self.logger.error(f'Response does not contain baseUrl. Response: {response.text}')
             raise
 
     def download(self):
@@ -69,8 +69,8 @@ class MediaItem:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             elif 'image' in response.headers['Content-Type']:
                 if os.path.exists(PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename):
-                    logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
-                                    f"in database.")
+                    self.logger.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
+                                        f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
@@ -78,12 +78,11 @@ class MediaItem:
                     with open(PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename, 'wb') as media_file:
                         media_file.write(response.content)
                 except OSError as err:
-                    logging.warning(f"Fail to download {self.filename} photo, {err}")
+                    self.logger.warning(f"Fail to download {self.filename} photo, {err}")
                     raise
             else:
-                logging.error('Unexpected content type.')
-                raise Exception()
-            logging.info(f"Media file {self.filename} stored.")
+                raise Exception('Unexpected content type.')
+            self.logger.info(f"Media file {self.filename} stored.")
             DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
 
@@ -93,8 +92,8 @@ class MediaItem:
                 raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
             if 'video' in response.headers['Content-Type']:
                 if os.path.exists(PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename):
-                    logging.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
-                                    f"in database.")
+                    self.logger.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
+                                        f"in database.")
                     DB_CONNECTION.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
                     DB.commit()
                     raise FileExistsError()
@@ -103,12 +102,11 @@ class MediaItem:
                         for chunk in response.iter_content(chunk_size=1024):
                             media_file.write(chunk)
                 except OSError as err:
-                    logging.warning(f"Fail to download {self.filename} video, {err}")
+                    self.logger.warning(f"Fail to download {self.filename} video, {err}")
                     raise
             else:
-                logging.error('Unexpected content type.')
-                raise Exception()
-            logging.info(f"Media file {self.filename} stored.")
+                raise Exception('Unexpected content type.')
+            self.logger.info(f"Media file {self.filename} stored.")
             DB_CONNECTION.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
             DB.commit()
 
@@ -123,8 +121,7 @@ class MediaItem:
             except Exception:
                 raise
         else:
-            logging.error('Unexpected mime type.')
-            raise Exception()
+            raise Exception('Unexpected mime type.')
 
     def remove_from_local(self):
         if 'video' in self.mime_type:
@@ -132,12 +129,11 @@ class MediaItem:
         elif 'image' in self.mime_type:
             path_to_file = PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename
         else:
-            logging.error("Unexpected error.")
-            raise Exception()
+            raise Exception('Unexpected error.')
         try:
             os.remove(path_to_file)
         except OSError as err:
-            logging.error(f"Fail to remove {self.filename}, {err}")
+            self.logger.error(f"Fail to remove {self.filename}, {err}")
 
     def is_exist_on_server(self, auth) -> bool:
         headers = {'Accept': 'application/json',
@@ -147,21 +143,20 @@ class MediaItem:
         if response.status_code == 401:
             raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
-            logging.warning(f"Item {self.id} not found on the server.")
+            self.logger.warning(f"Item {self.id} not found on the server.")
             return False
         elif response.status_code != 200:
-            logging.error(f'Response code: {response.status_code}. Response: {response.text}')
-            raise Exception()
+            raise Exception(f'Response code: {response.status_code}. Response: {response.text}')
         return True
 
 
 class MetadataHandler:
     """Gets pages with media metadata from Google Photo server and writes it to the database."""
-
     def __init__(self):
         self.list_one_page = []
         self.new_next_page_token = None
         self.current_mode = ''
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
@@ -202,8 +197,7 @@ class MetadataHandler:
                 elif mode == 'write_latest':
                     raise
                 else:
-                    logging.error('Unexpected error.')
-                    raise Exception()
+                    raise Exception('Unexpected error.')
 
     def check_mode(self):
         try:
@@ -211,7 +205,7 @@ class MetadataHandler:
             DB.commit()
             DB_CONNECTION.execute("SELECT value FROM account_info WHERE key='list_received'")
         except sqlite3.Error as err:
-            logging.error(f'DB query failed, {err}.')
+            self.logger.error(f'DB query failed, {err}.')
             raise
         self.current_mode = DB_CONNECTION.fetchone()[0]
 
@@ -220,6 +214,7 @@ class LocalStoreHandler:
     """Downloads media items that listed in the database."""
 
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
         DB_CONNECTION.execute(
             "SELECT object_id, media_type, filename, creation_time FROM my_media\
              WHERE stored = '0' ORDER BY creation_time DESC")
@@ -235,16 +230,16 @@ class LocalStoreHandler:
                 try:
                     os.makedirs(PATH_TO_IMAGES_STORAGE + item)
                 except OSError as err:
-                    logging.error(f"Fail to create folder, {err}")
+                    self.logger.error(f"Fail to create folder, {err}")
                     raise
-                logging.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
+                self.logger.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
             if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
                 try:
                     os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
                 except OSError as err:
-                    logging.error(f"Fail to create folder, {err}")
+                    self.logger.error(f"Fail to create folder, {err}")
                     raise
-                logging.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
+                self.logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def get_media_items(self, auth):
         for item in self.download_selection:
@@ -252,14 +247,14 @@ class LocalStoreHandler:
             try:
                 media_item.get_base_url(auth)
             except FileNotFoundError:
-                logging.warning(f"Item {item[2]} not found on the server, removing from database.")
+                self.logger.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_metadata_from_db()
                 continue
             except SessionNotAuth:
                 auth.refresh_access_token()
                 media_item.get_base_url(auth)
             except Exception:
-                logging.error(f'Fail to update base url by {item[2]}.')
+                self.logger.error(f'Fail to update base url by {item[2]}.')
                 raise
             try:
                 media_item.download()
@@ -271,13 +266,14 @@ class LocalStoreHandler:
 
 class Paginator:
     def __init__(self, auth):
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.auth = auth
         self.listing = MetadataHandler()
         self.listing.check_mode()
         self.list_retrieved = False
 
     def get_whole_media_list(self):
-        logging.warning(f'Running in mode {self.listing.current_mode}.')
+        self.logger.warning(f'Running in mode {self.listing.current_mode}.')
         page = 0
         while True:
             next_page_token = self.listing.new_next_page_token
@@ -298,33 +294,34 @@ class Paginator:
                 except ObjAlreadyExists:
                     break
             else:
-                logging.error('Unexpected error.')
-                raise Exception()
+                raise Exception('Unexpected error.')
             page += 1
-            logging.info(f'{page} - processed.')
+            self.logger.info(f'{page} - processed.')
             if self.list_retrieved:
                 DB_CONNECTION.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
                 DB.commit()
-                logging.warning("List has been retrieved.")
+                self.logger.warning("List has been retrieved.")
                 break
 
 
-class LocalDBActualization:
+class LocalStoreDBCleaner:
     def __init__(self, auth):
+        self.logger = logging.getLogger(self.__class__.__name__)
         DB_CONNECTION.execute("SELECT value FROM account_info WHERE key = 'last_processed_object_id'")
-        self.last_local_id_processed = DB_CONNECTION.fetchall()
-        if not self.last_local_id_processed:
+        last_local_id_processed = DB_CONNECTION.fetchall()
+        if not last_local_id_processed:
             DB_CONNECTION.execute(
                 "SELECT object_id, media_type, filename, creation_time FROM my_media\
                 WHERE stored != '0' ORDER BY id")
         else:
             DB_CONNECTION.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE \
                 stored != '0' and id > (SELECT id FROM my_media WHERE object_id = ?) ORDER BY id",
-                                  self.last_local_id_processed[0])
+                                  last_local_id_processed[0])
         self.local_metadata_selection = DB_CONNECTION.fetchall()
         DB_CONNECTION.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
         DB.commit()
         self.auth = auth
+        print(self.local_metadata_selection)
 
     def find_not_existing(self):
         for item in self.local_metadata_selection:
@@ -348,12 +345,17 @@ class LocalDBActualization:
             if not result:
                 media_item.remove_from_local()
                 media_item.remove_metadata_from_db()
-                logging.info(f"{media_item.filename} removed from local and db.")
+                self.logger.info(f"{media_item.filename} removed from local and db.")
+        now = datetime.datetime.today().strftime("%Y-%m-%dT%H:%M:%SZ")
+        DB_CONNECTION.execute(f"INSERT OR REPLACE INTO account_info (key, value) \
+                                VALUES ('last_actualization', '{now}')")
+        DB.commit()
 
 
 class Runtime:
     def __init__(self):
-        logging.info('Started.')
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.info('Started.')
         self.authorization = Authorization()
         try:
             self.authorization.get_tokens()
@@ -361,13 +363,13 @@ class Runtime:
             try:
                 self.authorization.authenticate()
             except Exception as err:
-                logging.error(f"Fail to authenticate, {err}")
+                self.logger.error(f"Fail to authenticate, {err}")
                 exit(5)
         except OSError as err:
-            logging.error(f"Fail to authenticate, {err}")
+            self.logger.error(f"Fail to authenticate, {err}")
             exit(6)
         except KeyError:
-            logging.error("Fail to authenticate.")
+            self.logger.error("Fail to authenticate.")
             exit(4)
 
     def main(self):
@@ -375,35 +377,36 @@ class Runtime:
         try:
             paginator.get_whole_media_list()
         except Exception as err:
-            logging.error(f"Unexpected error, {err}")
+            self.logger.error(f"Unexpected error, {err}")
             DB.close()
             exit(1)
-        logging.info('Start downloading a list of media items.')
+        self.logger.info('Start downloading a list of media items.')
         downloader = LocalStoreHandler()
         try:
             downloader.create_tree()
         except OSError:
-            logging.error("Please check storage paths in config.")
+            self.logger.error("Please check storage paths in config.")
             exit(2)
         try:
             downloader.get_media_items(self.authorization)
         except Exception as err:
-            logging.error(f"Fail to download media: {err}")
+            self.logger.error(f"Fail to download media: {err}")
             exit(3)
         except KeyboardInterrupt:
-            logging.warning("Aborted by user.")
-        logging.info("Start DB and local storage actualization.")
-        db_actualization = LocalDBActualization(self.authorization)
+            self.logger.warning("Aborted by user.")
+        self.logger.info("Start local DB and storage actualization.")
+        db_actualization = LocalStoreDBCleaner(self.authorization)
         try:
             db_actualization.find_not_existing()
         except Exception as err:
-            logging.error(f"Fail to actualize DB, {err}")
+            self.logger.error(f"Fail to actualize DB, {err}")
             exit(8)
         except KeyboardInterrupt:
-            logging.warning("Aborted by user.")
+            self.logger.warning("Aborted by user.")
         finally:
             DB.close()
-        logging.info('Finished.')
+        self.logger.info('Actualization is complete.')
+        self.logger.info('Finished.')
 
 
 if __name__ == '__main__':

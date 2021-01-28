@@ -1,31 +1,33 @@
 import logging
 
+logger = logging.getLogger('Exceptions')
+
 
 class ObjAlreadyExists(Exception):
     def __init__(self, message):
-        logging.info(message)
+        logger.info(message)
 
 
 class SessionNotAuth(Exception):
     def __init__(self, message):
-        logging.warning(message)
+        logger.warning(message)
 
 
 class DownloadError(Exception):
     def __init__(self, message):
-        logging.error(message)
+        logger.exception(message)
 
 
 class NoItemsInResp(Exception):
     def __init__(self, message):
-        logging.warning(message)
+        logger.warning(message)
 
 
 class NoNextPageTokenInResp(Exception):
     def __init__(self, message):
-        logging.warning(message)
+        logger.warning(message)
 
 
 class FailGettingPage(Exception):
     def __init__(self, message):
-        logging.error(message)
+        logger.exception(message)

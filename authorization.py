@@ -12,18 +12,17 @@ SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
 
 class Authorization:
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
         try:
             with open(IDENTITY_FILE_PATH) as file_data:
                 self.identity_data = json.load(file_data)['installed']
         except OSError as err:
-            logging.error(f'Error while reading {IDENTITY_FILE_PATH}, {err}')
+            self.logger.error(f'Error while reading {IDENTITY_FILE_PATH}, {err}')
             raise
         except KeyError:
-            logging.error(f"Invalid {IDENTITY_FILE_PATH} file.")
+            self.logger.error(f"Invalid {IDENTITY_FILE_PATH} file.")
             raise
-        scopes_for_uri = ''
-        for scope in SCOPES:
-            scopes_for_uri += scope+'%20'
+        scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
         self.url = f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
                    f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
         self.access_token = None
@@ -40,17 +39,16 @@ class Authorization:
                 'grant_type': 'authorization_code'}
         response = requests.post(self.identity_data['token_uri'], data=data)
         if response.status_code != 200:
-            logging.error(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
-            raise Exception()
+            raise Exception(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
         try:
             with open(OAUTH2_FILE_PATH, 'w') as file:
                 json.dump(response.json(), file)
         except OSError as err:
-            logging.error(f'Error while writing {OAUTH2_FILE_PATH}, {err}')
+            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}, {err}')
             raise
         self.access_token = response.json()['access_token']
         self.refresh_token = response.json()['refresh_token']
-        logging.warning("Authenticated successfully.")
+        self.logger.warning("Authenticated successfully.")
 
     def get_tokens(self):
         try:
@@ -59,13 +57,13 @@ class Authorization:
                 self.refresh_token = oauth_file_data['refresh_token']
                 self.access_token = oauth_file_data['access_token']
         except FileNotFoundError:
-            logging.warning("Authentication require.")
+            self.logger.warning("Authentication require.")
             raise
         except OSError as err:
-            logging.error(f"Fail to read {OAUTH2_FILE_PATH}, {err}")
+            self.logger.error(f"Fail to read {OAUTH2_FILE_PATH}, {err}")
             raise
         except KeyError as err:
-            logging.error(f"File does not contain tokens, {err}")
+            self.logger.error(f"File does not contain tokens, {err}")
             raise
         if os.path.exists(ACCESS_TOKEN_FILE):
             with open(ACCESS_TOKEN_FILE) as file:
@@ -73,8 +71,8 @@ class Authorization:
                 try:
                     self.access_token = json.loads(file_content)['access_token']
                 except KeyError:
-                    logging.error(f"File {ACCESS_TOKEN_FILE} exists but does not contain the access token, "
-                                  f"{file_content}")
+                    self.logger.error(f"File {ACCESS_TOKEN_FILE} exists but does not contain the access token, "
+                                      f"{file_content}")
                     raise
 
     def refresh_access_token(self):
@@ -87,7 +85,7 @@ class Authorization:
             with open(ACCESS_TOKEN_FILE, 'w') as f:
                 json.dump(response.json(), f)
         except OSError as err:
-            logging.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
+            self.logger.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
             raise
         self.access_token = response.json()['access_token']
-        logging.info('Token has been refreshed.')
+        self.logger.info('Token has been refreshed.')
