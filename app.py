@@ -155,7 +155,7 @@ class MetadataHandler:
     def __init__(self):
         self.list_one_page = []
         self.new_next_page_token = None
-        self.current_mode = ''
+        self.current_mode = '0'
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def get_page(self, auth, next_page_token):
@@ -201,13 +201,14 @@ class MetadataHandler:
 
     def check_mode(self):
         try:
-            DB_CONNECTION.execute("INSERT OR IGNORE INTO account_info (key, value) VALUES ('list_received', '0')")
-            DB.commit()
             DB_CONNECTION.execute("SELECT value FROM account_info WHERE key='list_received'")
         except sqlite3.Error as err:
             self.logger.error(f'DB query failed, {err}.')
             raise
-        self.current_mode = DB_CONNECTION.fetchone()[0]
+        try:
+            self.current_mode = DB_CONNECTION.fetchone()[0]
+        except TypeError:
+            pass
 
 
 class LocalStoreHandler:
@@ -262,6 +263,7 @@ class LocalStoreHandler:
                 continue
             except OSError:
                 continue
+        self.logger.info('Getting media items is complete.')
 
 
 class Paginator:
@@ -273,7 +275,7 @@ class Paginator:
         self.list_retrieved = False
 
     def get_whole_media_list(self):
-        self.logger.warning(f'Running in mode {self.listing.current_mode}.')
+        self.logger.info(f'Running in mode {self.listing.current_mode}.')
         page = 0
         while True:
             next_page_token = self.listing.new_next_page_token
