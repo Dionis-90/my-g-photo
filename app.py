@@ -5,7 +5,7 @@
 
 import sqlite3
 import datetime
-from authorization import *
+from authentication import *
 from exceptions import *
 
 # Define constants
@@ -322,7 +322,10 @@ class LocalStoreDBCleaner:
         DB.commit()
         self.auth = auth
         DB_CONNECTION.execute("SELECT value FROM account_info WHERE key = 'last_actualization'")
-        self.last_actualization_date = DB_CONNECTION.fetchone()
+        try:
+            self.last_actualization_date = DB_CONNECTION.fetchone()[0]
+        except TypeError:
+            self.last_actualization_date = False
 
     def find_not_existing(self):
         for item in self.local_metadata_selection:
@@ -356,7 +359,7 @@ class LocalStoreDBCleaner:
         if not self.last_actualization_date:
             return True
         difference = datetime.datetime.now() - \
-            datetime.datetime.strptime(self.last_actualization_date[0], "%Y-%m-%dT%H:%M:%SZ")
+            datetime.datetime.strptime(self.last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
         difference = difference.days
         if difference < ACTUALIZATION_PERIOD:
             return False
@@ -368,12 +371,12 @@ class Runtime:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info('Started.')
-        self.authorization = Authorization()
+        self.authentication = Authentication()
         try:
-            self.authorization.get_tokens()
+            self.authentication.get_tokens()
         except FileNotFoundError:
             try:
-                self.authorization.authenticate()
+                self.authentication.authenticate()
             except Exception as err:
                 self.logger.error(f"Fail to authenticate, {err}")
                 exit(5)
@@ -385,7 +388,7 @@ class Runtime:
             exit(4)
 
     def main(self):
-        paginator = Paginator(self.authorization)
+        paginator = Paginator(self.authentication)
         try:
             paginator.get_whole_media_list()
         except Exception as err:
@@ -400,14 +403,14 @@ class Runtime:
             self.logger.error("Please check storage paths in config.")
             exit(2)
         try:
-            downloader.get_media_items(self.authorization)
+            downloader.get_media_items(self.authentication)
         except Exception as err:
             self.logger.error(f"Fail to download media: {err}")
             exit(3)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
             exit(0)
-        db_actualization = LocalStoreDBCleaner(self.authorization)
+        db_actualization = LocalStoreDBCleaner(self.authentication)
         result = db_actualization.is_actualization_needed()
         if result:
             self.logger.info("Start local DB and storage actualization.")

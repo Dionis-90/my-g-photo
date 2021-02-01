@@ -10,7 +10,7 @@ SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
           'https://www.googleapis.com/auth/photoslibrary.sharing']
 
 
-class Authorization:
+class Authentication:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         try:
