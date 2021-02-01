@@ -8,6 +8,7 @@ DB_FILE_PATH = 'db.sqlite'
 PATH_TO_IMAGES_STORAGE = 'media/'
 PATH_TO_VIDEOS_STORAGE = 'media/'
 LOG_FILE_PATH = 'working.log'
+ACTUALIZATION_PERIOD = 7  # Days
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s: %(message)s',
                     filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)

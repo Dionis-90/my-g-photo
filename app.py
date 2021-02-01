@@ -321,7 +321,8 @@ class LocalStoreDBCleaner:
         DB_CONNECTION.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
         DB.commit()
         self.auth = auth
-        print(self.local_metadata_selection)
+        DB_CONNECTION.execute("SELECT value FROM account_info WHERE key = 'last_actualization'")
+        self.last_actualization_date = DB_CONNECTION.fetchone()
 
     def find_not_existing(self):
         for item in self.local_metadata_selection:
@@ -350,6 +351,17 @@ class LocalStoreDBCleaner:
         DB_CONNECTION.execute(f"INSERT OR REPLACE INTO account_info (key, value) \
                                 VALUES ('last_actualization', '{now}')")
         DB.commit()
+
+    def is_actualization_needed(self) -> bool:
+        if not self.last_actualization_date:
+            return True
+        difference = datetime.datetime.now() - \
+            datetime.datetime.strptime(self.last_actualization_date[0], "%Y-%m-%dT%H:%M:%SZ")
+        difference = difference.days
+        if difference < ACTUALIZATION_PERIOD:
+            return False
+        else:
+            return True
 
 
 class Runtime:
@@ -394,18 +406,22 @@ class Runtime:
             exit(3)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
-        self.logger.info("Start local DB and storage actualization.")
+            exit(0)
         db_actualization = LocalStoreDBCleaner(self.authorization)
-        try:
-            db_actualization.find_not_existing()
-        except Exception as err:
-            self.logger.error(f"Fail to actualize DB, {err}")
-            exit(8)
-        except KeyboardInterrupt:
-            self.logger.warning("Aborted by user.")
-        finally:
-            DB.close()
-        self.logger.info('Actualization is complete.')
+        result = db_actualization.is_actualization_needed()
+        if result:
+            self.logger.info("Start local DB and storage actualization.")
+            try:
+                db_actualization.find_not_existing()
+            except Exception as err:
+                self.logger.error(f"Fail to actualize DB, {err}")
+                exit(8)
+            except KeyboardInterrupt:
+                self.logger.warning("Aborted by user.")
+                exit(0)
+            finally:
+                DB.close()
+            self.logger.info('Actualization is complete.')
         self.logger.info('Finished.')
 
 
