@@ -16,9 +16,9 @@ Not tested on Windows OS.
 sudo apt update && sudo apt install python3.8 unzip
 python3.8 -m pip install --upgrade pip requests
 ```
-- Download an application:
+- Download the application:
 https://github.com/Dionis-90/my-g-photo/archive/refs/heads/main.zip
-- Unpack:
+- Unpack it:
 ```
 unzip main.zip && cd my-g-photo-main
 ```
@@ -36,7 +36,9 @@ python3.8 app.py &
 Also you can to set up crontab or anacrontab.
 Example for daily anacron:
 Create file:
-```nano /etc/cron.daily/my-g-photo```
+```
+nano /etc/cron.daily/my-g-photo
+```
 and put there:
 ```
 #!/bin/bash
