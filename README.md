@@ -13,14 +13,19 @@ Not tested on Windows OS.
 ### Debian/Ubuntu
 - Install requirements:
 ```
-sudo apt update && sudo apt install python3.8 unzip
+sudo apt update && sudo apt install python3.8 unzip git
 python3.8 -m pip install --upgrade pip requests
 ```
 - Download the application:
 https://github.com/Dionis-90/my-g-photo/archive/refs/heads/main.zip
-- Unpack it:
+or ```git clone git@github.com:Dionis-90/my-g-photo.git```
+- Unpack it (if you used web url):
 ```
-unzip main.zip && cd my-g-photo-main
+unzip main.zip
+```
+and enter the folder
+```
+cd my-g-photo
 ```
 - Create database and config file:
 ```
