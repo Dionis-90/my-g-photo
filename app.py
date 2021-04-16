@@ -46,8 +46,7 @@ class MediaItem:
     def get_base_url(self, auth):  # TODO: Check if video object first
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
-        params = {'key': API_KEY}
-        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, params=params, headers=headers)
+        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, headers=headers)
         if response.status_code == 401:
             raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
@@ -138,8 +137,7 @@ class MediaItem:
     def is_exist_on_server(self, auth) -> bool:
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
-        params = {'key': API_KEY}
-        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, params=params, headers=headers)
+        response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, headers=headers)
         if response.status_code == 401:
             raise SessionNotAuth("Session unauthorized.")
         elif response.status_code == 404:
@@ -161,8 +159,7 @@ class MetadataHandler:
     def get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
         objects_count_on_page = '100'
-        params = {'key': API_KEY,
-                  'pageSize': objects_count_on_page,
+        params = {'pageSize': objects_count_on_page,
                   'pageToken': next_page_token}
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
