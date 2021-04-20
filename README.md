@@ -25,7 +25,7 @@ unzip main.zip
 ```
 and enter the folder
 ```
-cd my-g-photo
+cd my-g-photo || cd my-g-photo-main
 ```
 - Create database and config file:
 ```
