@@ -1,6 +1,8 @@
 import sqlite3
 import datetime
-from authentication import *
+import requests
+import os
+from config import *
 from exceptions import *
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
