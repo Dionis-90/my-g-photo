@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.7
+#!/usr/bin/env python3.8
 # This is an application that gets, downloads media files and metadata from your Google Photo storage to your
 # local storage.
 
@@ -198,13 +198,13 @@ class LocalStorage:
                 try:
                     result = media_item.is_exist_on_server(auth)
                 except (Exception, KeyboardInterrupt):
-                    cursor.execute("INSERT INTO account_info (key, value) \
-                        VALUES('last_processed_object_id', ?)", (media_item.id,))
+                    cursor.execute("INSERT INTO account_info (key, value) "
+                                   "VALUES('last_processed_object_id', ?)", (media_item.id,))
                     self.db_conn.commit()
                     raise
             except (Exception, KeyboardInterrupt):
-                cursor.execute("INSERT INTO account_info (key, value) \
-                    VALUES('last_processed_object_id', ?)", (media_item.id,))
+                cursor.execute("INSERT INTO account_info (key, value) "
+                               "VALUES('last_processed_object_id', ?)", (media_item.id,))
                 self.db_conn.commit()
                 raise
             if not result:
@@ -239,9 +239,7 @@ class LocalStorage:
                 raise
             try:
                 media_item.download()
-            except FileExistsError:
-                continue
-            except OSError:
+            except (FileExistsError, OSError):
                 continue
         self.logger.info('Getting media items is complete.')
 
@@ -251,20 +249,8 @@ class Runtime:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info('Started.')
         self.authentication = Authentication()
-        try:
-            self.authentication.get_tokens()
-        except FileNotFoundError:
-            try:
-                self.authentication.authenticate()
-            except Exception as err:
-                self.logger.error(f"Fail to authenticate, {err}")
-                exit(5)
-        except OSError as err:
-            self.logger.error(f"Fail to authenticate, {err}")
-            exit(6)
-        except KeyError:
-            self.logger.error("Fail to authenticate.")
-            exit(4)
+        self.metadata = Metadata()
+        self.local_storage = LocalStorage()
 
     def __is_db_exists(self) -> bool:
         if not os.path.exists(DB_FILE_PATH):
@@ -283,19 +269,25 @@ class Runtime:
         return True
 
     def main(self):
+        try:
+            self.authentication.authenticate()
+        except Exception as err:
+            self.logger.error(f"Fail to authenticate.\n{err}")
+            exit(5)
         if not self.__is_db_exists():
             if not self.__db_creation():
                 exit(0)
-        metadata = Metadata()
         try:
-            metadata.get_metadata_list(self.authentication)
+            self.metadata.get_metadata_list(self.authentication)
         except Exception as err:
-            self.logger.error(f"Unexpected error, {err}")
+            self.logger.error(f"Unexpected error.\n{err}")
             exit(1)
+        except KeyboardInterrupt:
+            self.logger.warning("Aborted by user.")
+            exit(0)
         self.logger.info('Start downloading a list of media items.')
-        local_storage = LocalStorage()
         try:
-            local_storage.get_media_items(self.authentication)
+            self.local_storage.get_media_items(self.authentication)
         except Exception as err:
             self.logger.error(f"Fail to download media: {err}")
             exit(3)
@@ -303,7 +295,7 @@ class Runtime:
             self.logger.warning("Aborted by user.")
             exit(0)
         try:
-            local_storage.find_and_clean_not_existing(self.authentication)
+            self.local_storage.find_and_clean_not_existing(self.authentication)
         except Exception as err:
             self.logger.error(f'Fail to actualize DB.\n{err}')
             exit(8)

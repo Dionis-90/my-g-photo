@@ -4,7 +4,7 @@ This is a console application that gets media files and media metadata from your
 ## Requirements
 Unix-like OS with Python3.6 or beyond.
 Python external modules:
-- Requests: ```pip install requests```
+- Requests
 
 
 Not tested on Windows OS.
@@ -23,7 +23,7 @@ or ```git clone git@github.com:Dionis-90/my-g-photo.git```
 ```
 unzip main.zip
 ```
-and enter the folder
+- Enter the folder
 ```
 cd my-g-photo || cd my-g-photo-main
 ```
@@ -38,13 +38,14 @@ cp config.py.example config.py
 python3.8 app.py &
 ```
 
-Also you can to set up crontab or anacrontab.
-Example for daily anacron:
-Create file:
+Also, you can set up crontab or anacrontab.
+
+#### Example for daily anacron:
+- Create file:
 ```
 nano /etc/cron.daily/my-g-photo
 ```
-and put there:
+- Put there:
 ```
 #!/bin/bash
 HOME=/home/{Your user name}

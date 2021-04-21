@@ -5,30 +5,49 @@ import requests
 from config import *
 from exceptions import *
 
-SCOPES = ['https://www.googleapis.com/auth/photoslibrary',
-          'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
-          'https://www.googleapis.com/auth/photoslibrary.sharing']
+SCOPES = [
+    'https://www.googleapis.com/auth/photoslibrary.readonly',
+    # 'https://www.googleapis.com/auth/photoslibrary',
+    # 'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
+    # 'https://www.googleapis.com/auth/photoslibrary.sharing',
+          ]
 
 
 class Authentication:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.identity_data = None
+        self.access_token = None
+        self.refresh_token = None
+
+    @property
+    def url(self):
+        scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
+        return f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
+               f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
+
+    def __read_identity_data(self):
         try:
             with open(IDENTITY_FILE_PATH) as file_data:
                 self.identity_data = json.load(file_data)['installed']
         except OSError as err:
-            self.logger.error(f'Error while reading {IDENTITY_FILE_PATH}, {err}')
+            self.logger.error(f'Error while reading {IDENTITY_FILE_PATH}.\n{err}')
             raise
         except KeyError:
             self.logger.error(f"Invalid {IDENTITY_FILE_PATH} file.")
             raise
-        scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
-        self.url = f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
-                   f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
-        self.access_token = None
-        self.refresh_token = None
+
+    def __is_authenticated(self) -> bool:
+        self.__read_identity_data()
+        try:
+            self.__get_tokens()
+        except FileNotFoundError:
+            return False
+        return True
 
     def authenticate(self):
+        if self.__is_authenticated():
+            return True
         print(f"If you do not have local browser please visit url: {self.url}")
         webbrowser.open(self.url, new=0, autoraise=True)
         code = input("Please enter the code: ")
@@ -44,13 +63,13 @@ class Authentication:
             with open(OAUTH2_FILE_PATH, 'w') as file:
                 json.dump(response.json(), file)
         except OSError as err:
-            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}, {err}')
+            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
             raise
         self.access_token = response.json()['access_token']
         self.refresh_token = response.json()['refresh_token']
         self.logger.warning("Authenticated successfully.")
 
-    def get_tokens(self):
+    def __get_tokens(self):
         try:
             with open(OAUTH2_FILE_PATH) as file:
                 oauth_file_data = json.load(file)
