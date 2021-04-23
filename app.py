@@ -18,8 +18,8 @@ SCOPES = [
 
 class Authentication:
     def __init__(self, db_conn):
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.identity_data = None
+        self.__logger = logging.getLogger(self.__class__.__name__)
+        self.__identity_data = None
         self.__access_token = None
         self.__refresh_token = None
         self.__refresh_token_time = None
@@ -28,8 +28,8 @@ class Authentication:
     @property
     def __url(self):
         scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
-        return f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
-               f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
+        return f"{self.__identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
+               f"redirect_uri={self.__identity_data['redirect_uris'][0]}&client_id={self.__identity_data['client_id']}"
 
     @property
     def access_token(self):
@@ -42,12 +42,12 @@ class Authentication:
     def __read_identity_data(self):
         try:
             with open(IDENTITY_FILE_PATH) as file_data:
-                self.identity_data = json.load(file_data)['installed']
+                self.__identity_data = json.load(file_data)['installed']
         except OSError as err:
-            self.logger.error(f'Error while reading {IDENTITY_FILE_PATH}.\n{err}')
+            self.__logger.error(f'Error while reading {IDENTITY_FILE_PATH}.\n{err}')
             raise
         except KeyError:
-            self.logger.error(f"Invalid {IDENTITY_FILE_PATH} file.")
+            self.__logger.error(f"Invalid {IDENTITY_FILE_PATH} file.")
             raise
 
     def __is_authenticated(self) -> bool:
@@ -73,13 +73,13 @@ class Authentication:
                 self.__refresh_token = oauth_file_data['refresh_token']
                 self.__access_token = oauth_file_data['access_token']
         except FileNotFoundError:
-            self.logger.warning('Authentication require.')
+            self.__logger.warning('Authentication require.')
             raise
         except OSError as err:
-            self.logger.error(f'Fail to read {OAUTH2_FILE_PATH}.\n{err}')
+            self.__logger.error(f'Fail to read {OAUTH2_FILE_PATH}.\n{err}')
             raise
         except KeyError as err:
-            self.logger.error(f'File does not contain tokens.\n{err}')
+            self.__logger.error(f'File does not contain tokens.\n{err}')
             raise
 
     def __read_latest_token(self):
@@ -90,8 +90,8 @@ class Authentication:
             try:
                 self.__access_token = json.loads(file_content)['access_token']
             except KeyError:
-                self.logger.error(f'File {ACCESS_TOKEN_FILE} exists but does not contain the access token, '
-                                  f'{file_content}')
+                self.__logger.error(f'File {ACCESS_TOKEN_FILE} exists but does not contain the access token, '
+                                    f'{file_content}')
                 raise
 
     def __set_token_time_now(self):
@@ -102,20 +102,20 @@ class Authentication:
         self.__db_conn.commit()
 
     def __refresh_access_token(self):
-        values = {'client_id': self.identity_data['client_id'],
-                  'client_secret': self.identity_data['client_secret'],
+        values = {'client_id': self.__identity_data['client_id'],
+                  'client_secret': self.__identity_data['client_secret'],
                   'refresh_token': self.__refresh_token,
                   'grant_type': 'refresh_token'}
-        response = requests.post(self.identity_data['token_uri'], data=values)
+        response = requests.post(self.__identity_data['token_uri'], data=values)
         try:
             with open(ACCESS_TOKEN_FILE, 'w') as f:
                 json.dump(response.json(), f)
         except OSError as err:
-            self.logger.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
+            self.__logger.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
             raise
         self.__access_token = response.json()['access_token']
         self.__set_token_time_now()
-        self.logger.info('Token has been refreshed.')
+        self.__logger.info('Token has been refreshed.')
 
     def authenticate(self):
         self.__read_identity_data()
@@ -128,23 +128,23 @@ class Authentication:
         webbrowser.open(self.__url, new=0, autoraise=True)
         code = input("Please enter the code: ")
         data = {'code': code,
-                'client_id': self.identity_data['client_id'],
-                'client_secret': self.identity_data['client_secret'],
-                'redirect_uri': self.identity_data['redirect_uris'][0],
+                'client_id': self.__identity_data['client_id'],
+                'client_secret': self.__identity_data['client_secret'],
+                'redirect_uri': self.__identity_data['redirect_uris'][0],
                 'grant_type': 'authorization_code'}
-        response = requests.post(self.identity_data['token_uri'], data=data)
+        response = requests.post(self.__identity_data['token_uri'], data=data)
         if response.status_code != 200:
             raise SessionNotAuth(f"http code: {response.status_code}, response: {response.text}.")
         try:
             with open(OAUTH2_FILE_PATH, 'w') as file:
                 json.dump(response.json(), file)
         except OSError as err:
-            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
+            self.__logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
             raise
         self.__access_token = response.json()['access_token']
         self.__refresh_token = response.json()['refresh_token']
         self.__set_token_time_now()
-        self.logger.warning("Authenticated successfully.")
+        self.__logger.warning("Authenticated successfully.")
 
 
 class MetadataList:
@@ -152,41 +152,33 @@ class MetadataList:
         self.__new_next_page_token = None
         self.__current_mode = '0'
         self.__list_retrieved = False
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.__page = None
+        self.__logger = logging.getLogger(self.__class__.__name__)
         self.__db_conn = db_conn
 
-    def __get_page(self, auth, next_page_token) -> json:
+    def __get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
-        objects_count_on_page = '100'
+        objects_count_on_page = '2'
         params = {'pageSize': objects_count_on_page,
                   'pageToken': next_page_token}
-        headers = {'Accept': 'application/json',
-                   'Authorization': 'Bearer ' + auth.access_token}
-        response = requests.get(url, params=params, headers=headers)
-        if response.status_code == 401:
-            raise SessionNotAuth("Unauthorized.")
-        elif response.status_code != 200:
-            raise FailGettingPage(f"http code {response.status_code} when trying to get page of list with "
-                                  f"next_page_token: {next_page_token}, response: {response.text}")
+        representation = make_request_w_auth(auth.access_token, url, params)
         try:
-            page = response.json()['mediaItems']
+            self.__page = representation['mediaItems']
         except KeyError:
-            raise NoItemsInResp(f"No mediaItems object in response. Response: {response.text}")
+            raise NoItemsInResp(f"No mediaItems object in response. Response: {representation}")
         try:
-            self.__new_next_page_token = response.json()['nextPageToken']
+            self.__new_next_page_token = representation['nextPageToken']
         except KeyError:
             self.__new_next_page_token = None
             raise NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
-        return page
 
-    @staticmethod
-    def __write_page(page, mode='write_all'):
+    def __write_page(self, mode='write_all'):
         """
         :param mode: 'write_all' or 'write_latest'
         """
-        for item in page:
+        for item in self.__page:
             media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
-                                   item['mediaMetadata']['creationTime'])
+                                   item['mediaMetadata']['creationTime'], self.__db_conn)
             try:
                 media_item.write_to_db()
             except ObjAlreadyExists:
@@ -195,54 +187,58 @@ class MetadataList:
                 elif mode == 'write_latest':
                     raise
                 else:
-                    raise MyExceptions('Unexpected error.')
+                    raise MyBaseException('Unexpected error.')
 
     def __check_mode(self):
         cursor = self.__db_conn.cursor()
         try:
             cursor.execute("SELECT value FROM account_info WHERE key='list_received'")
         except sqlite3.Error as err:
-            self.logger.error(f'DB query failed, {err}.')
+            self.__logger.error(f'DB query failed, {err}.')
             raise
         try:
             self.__current_mode = cursor.fetchone()[0]
         except TypeError:
             pass
 
+    def get_by_ids(self, ids: tuple, auth):
+        url = SRV_ENDPOINT + 'mediaItems:batchGet'
+        params = {'mediaItemIds': i for i in ids}
+        representation = make_request_w_auth(auth.access_token, url, params=params)
+
     def get_metadata_list(self, auth):
         """Gets media metadata from Google Photo server and writes it to the local database."""
         self.__check_mode()
         cursor = self.__db_conn.cursor()
-        self.logger.info(f'Running in mode {self.__current_mode}.')
         pages = 0
         while True:
             try:
-                page = self.__get_page(auth, self.__new_next_page_token)
-            except (NoNextPageTokenInResp, NoItemsInResp):
+                self.__get_page(auth, self.__new_next_page_token)
+            except (NoItemsInResp, NoNextPageTokenInResp):
                 self.__list_retrieved = True
             except FailGettingPage:
                 break
             if self.__current_mode == '0':
-                self.__write_page(page)
+                self.__write_page()
             elif self.__current_mode == '1':
                 try:
-                    self.__write_page(page, mode='write_latest')
+                    self.__write_page(mode='write_latest')
                 except ObjAlreadyExists:
                     break
             else:
                 raise Exception('Unexpected error.')
             pages += 1
-            self.logger.info(f'{pages} - processed.')
+            self.__logger.info(f'{pages} - processed.')
             if self.__list_retrieved:
-                cursor.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
+                cursor.execute("INSERT OR REPLACE INTO account_info (key, value) VALUES ('list_received', '1') ")
                 self.__db_conn.commit()
-                self.logger.warning("List has been retrieved.")
+                self.__logger.warning('List of media has been retrieved.')
                 break
 
 
 class LocalStorage:
     def __init__(self, db_conn):
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.__logger = logging.getLogger(self.__class__.__name__)
         self.__db_conn = db_conn
         self.__download_selection = None
         self.__actualization_selection = None
@@ -254,7 +250,7 @@ class LocalStorage:
             cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media "
                            "WHERE stored = '0' ORDER BY creation_time DESC")
         except sqlite3.Error as err:
-            self.logger.error(f'Fail to communicate with DB.\n{err}')
+            self.__logger.error(f'Fail to communicate with DB.\n{err}')
             raise
         self.__download_selection = cursor.fetchall()
 
@@ -268,16 +264,16 @@ class LocalStorage:
                 try:
                     os.makedirs(PATH_TO_IMAGES_STORAGE + item)
                 except OSError as err:
-                    self.logger.error(f"Fail to create folder, {err}")
+                    self.__logger.error(f"Fail to create folder, {err}")
                     raise
-                self.logger.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
+                self.__logger.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
             if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
                 try:
                     os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
                 except OSError as err:
-                    self.logger.error(f"Fail to create folder, {err}")
+                    self.__logger.error(f"Fail to create folder, {err}")
                     raise
-                self.logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
+                self.__logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def __get_actualization_selection(self):
         cursor = self.__db_conn.cursor()
@@ -303,6 +299,7 @@ class LocalStorage:
             pass
 
     def is_actualization_needed(self) -> bool:
+        self.__get_last_actualization()
         if not self.__last_actualization_date:
             return True
         difference = datetime.datetime.now() - \
@@ -325,11 +322,9 @@ class LocalStorage:
         self.__db_conn.commit()
 
     def remove_not_existing(self, auth) -> bool:  # TODO: use batchGet
-        self.logger.info("Start local DB and storage actualization.")
-        self.__get_last_actualization()
         self.__get_actualization_selection()
         for item in self.__actualization_selection:
-            media_item = MediaItem(*item)
+            media_item = MediaItem(*item, self.__db_conn)
             try:
                 result = media_item.is_exist_on_server(auth)
             except (Exception, KeyboardInterrupt):
@@ -338,7 +333,7 @@ class LocalStorage:
             if not result:
                 media_item.remove_from_local()
                 media_item.remove_from_db()
-                self.logger.info(f"{media_item.filename} removed from local and db.")
+                self.__logger.info(f"{media_item.filename} removed from local and db.")
         self.__set_last_actualization_date()
         return True
 
@@ -348,14 +343,14 @@ class LocalStorage:
         try:
             self.__create_tree()
         except OSError:
-            self.logger.error("Please check storage paths in config.")
+            self.__logger.error("Please check storage paths in config.")
             raise
         for item in self.__download_selection:
-            media_item = MediaItem(*item)
+            media_item = MediaItem(*item, self.__db_conn)
             try:
                 media_item.get_base_url(auth)
             except FileNotFoundError:
-                self.logger.warning(f"Item {item[2]} not found on the server, removing from database.")
+                self.__logger.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_from_db()
                 continue
             except VideoNotReady:
@@ -364,7 +359,7 @@ class LocalStorage:
                 media_item.download()
             except (FileExistsError, OSError):
                 continue
-        self.logger.info('Getting media items is complete.')
+        self.__logger.info('Getting media items is complete.')
 
 
 class Main:
@@ -391,7 +386,7 @@ class Main:
             self.logger.warning('Aborted by user.')
             exit(3)
         try:
-            shutil.copy(DB_FILE_PATH + '.structure', DB_FILE_PATH)
+            shutil.copy('db.sqlite.structure', DB_FILE_PATH)
         except OSError as err:
             message = f'Fail to create DB.\n{err}'
             print(message)
@@ -406,13 +401,14 @@ class Main:
             self.logger.info('Start downloading a list of media items.')
             self.local_storage.download_media_items(self.authentication)
             if self.local_storage.is_actualization_needed():
+                self.logger.info("Start local DB and storage actualization.")
                 self.local_storage.remove_not_existing(self.authentication)
+                self.logger.info('Actualization is complete.')
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
             exit(3)
         finally:
             self.db_conn.close()
-        self.logger.info('Actualization is complete.')
         self.logger.info('Finished.')
 
 
