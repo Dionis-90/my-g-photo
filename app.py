@@ -5,6 +5,7 @@
 import json
 import webbrowser
 import shutil
+import time
 from lib import *
 
 SCOPES = [
@@ -19,15 +20,24 @@ class Authentication:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.identity_data = None
-        self.access_token = None
-        self.refresh_token = None
-        self.db_conn = None
+        self.__access_token = None
+        self.__refresh_token = None
+        self.__refresh_token_time = None
+        self.__db_conn = None
 
     @property
-    def url(self):
+    def __url(self):
         scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
         return f"{self.identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
                f"redirect_uri={self.identity_data['redirect_uris'][0]}&client_id={self.identity_data['client_id']}"
+
+    @property
+    def access_token(self):
+        now = time.time()
+        difference = int(now) - int(self.__refresh_token_time)
+        if difference > 3599:
+            self.__refresh_access_token()
+        return self.__access_token
 
     def __read_identity_data(self):
         try:
@@ -41,44 +51,27 @@ class Authentication:
             raise
 
     def __is_authenticated(self) -> bool:
-        self.__read_identity_data()
         try:
             self.__get_tokens()
         except FileNotFoundError:
             return False
         return True
 
-    def authenticate(self):
-        if self.__is_authenticated():
-            self.__read_latest_token()
-            return True
-        print(f"If you do not have local browser please visit url: {self.url}")
-        webbrowser.open(self.url, new=0, autoraise=True)
-        code = input("Please enter the code: ")
-        data = {'code': code,
-                'client_id': self.identity_data['client_id'],
-                'client_secret': self.identity_data['client_secret'],
-                'redirect_uri': self.identity_data['redirect_uris'][0],
-                'grant_type': 'authorization_code'}
-        response = requests.post(self.identity_data['token_uri'], data=data)
-        if response.status_code != 200:
-            raise Exception(f"Not authenticated. http code: {response.status_code}, response: {response.text}.")
+    def __get_token_time(self):
+        cursor = self.__db_conn.cursor()
+        cursor.execute("SELECT value FROM account_info WHERE key='token_refreshed'")
         try:
-            with open(OAUTH2_FILE_PATH, 'w') as file:
-                json.dump(response.json(), file)
-        except OSError as err:
-            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
-            raise
-        self.access_token = response.json()['access_token']
-        self.refresh_token = response.json()['refresh_token']
-        self.logger.warning("Authenticated successfully.")
+            self.__refresh_token_time = cursor.fetchone()[0]
+        except TypeError:
+            return False
+        return True
 
     def __get_tokens(self):
         try:
             with open(OAUTH2_FILE_PATH) as file:
                 oauth_file_data = json.load(file)
-                self.refresh_token = oauth_file_data['refresh_token']
-                self.access_token = oauth_file_data['access_token']
+                self.__refresh_token = oauth_file_data['refresh_token']
+                self.__access_token = oauth_file_data['access_token']
         except FileNotFoundError:
             self.logger.warning('Authentication require.')
             raise
@@ -95,18 +88,23 @@ class Authentication:
         with open(ACCESS_TOKEN_FILE) as file:
             file_content = file.read()
             try:
-                self.access_token = json.loads(file_content)['access_token']
+                self.__access_token = json.loads(file_content)['access_token']
             except KeyError:
                 self.logger.error(f'File {ACCESS_TOKEN_FILE} exists but does not contain the access token, '
                                   f'{file_content}')
                 raise
 
-    def refresh_access_token(self):
-        self.db_conn = db_connect()
-        cursor = self.db_conn.cursor()
+    def __set_token_time_now(self):
+        cursor = self.__db_conn.cursor()
+        now = int(time.time())
+        self.__refresh_token_time = str(now)
+        cursor.execute("INSERT OR REPLACE INTO `account_info` (key, value) VALUES ('token_refreshed', ?)", (str(now),))
+        self.__db_conn.commit()
+
+    def __refresh_access_token(self):
         values = {'client_id': self.identity_data['client_id'],
                   'client_secret': self.identity_data['client_secret'],
-                  'refresh_token': self.refresh_token,
+                  'refresh_token': self.__refresh_token,
                   'grant_type': 'refresh_token'}
         response = requests.post(self.identity_data['token_uri'], data=values)
         try:
@@ -115,14 +113,42 @@ class Authentication:
         except OSError as err:
             self.logger.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
             raise
-        self.access_token = response.json()['access_token']
-        now = datetime.datetime.today().strftime('%s')
-        cursor.execute("INSERT OR REPLACE INTO `account_info` (key, value) VALUES ('token_refreshed', ?)", (now,))
-        self.db_conn.commit()
+        self.__access_token = response.json()['access_token']
+        self.__set_token_time_now()
         self.logger.info('Token has been refreshed.')
 
+    def authenticate(self):
+        self.__db_conn = db_connect()
+        self.__read_identity_data()
+        if self.__is_authenticated():
+            self.__read_latest_token()
+            if not self.__get_token_time():
+                self.__refresh_access_token()
+            return True
+        print(f"If you do not have local browser please visit url: {self.__url}")
+        webbrowser.open(self.__url, new=0, autoraise=True)
+        code = input("Please enter the code: ")
+        data = {'code': code,
+                'client_id': self.identity_data['client_id'],
+                'client_secret': self.identity_data['client_secret'],
+                'redirect_uri': self.identity_data['redirect_uris'][0],
+                'grant_type': 'authorization_code'}
+        response = requests.post(self.identity_data['token_uri'], data=data)
+        if response.status_code != 200:
+            raise SessionNotAuth(f"http code: {response.status_code}, response: {response.text}.")
+        try:
+            with open(OAUTH2_FILE_PATH, 'w') as file:
+                json.dump(response.json(), file)
+        except OSError as err:
+            self.logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
+            raise
+        self.__access_token = response.json()['access_token']
+        self.__refresh_token = response.json()['refresh_token']
+        self.__set_token_time_now()
+        self.logger.warning("Authenticated successfully.")
 
-class Metadata:
+
+class MetadataList:
     def __init__(self):
         self.new_next_page_token = None
         self.current_mode = '0'
@@ -194,9 +220,6 @@ class Metadata:
         while True:
             try:
                 page = self.__get_page(auth, self.new_next_page_token)
-            except SessionNotAuth:
-                auth.refresh_access_token()
-                continue
             except (NoNextPageTokenInResp, NoItemsInResp):
                 self.list_retrieved = True
             except FailGettingPage:
@@ -297,31 +320,25 @@ class LocalStorage:
         cursor.execute(f"INSERT OR REPLACE INTO account_info (key, value) VALUES ('last_actualization', '{now}')")
         self.db_conn.commit()
 
-    def find_and_clean_not_existing(self, auth) -> bool:
+    def __write_last_processed(self, item_id):
+        cursor = self.db_conn.cursor()
+        cursor.execute("INSERT INTO account_info (key, value) "
+                       "VALUES('last_processed_object_id', ?)", (item_id,))
+        self.db_conn.commit()
+
+    def find_and_clean_not_existing(self, auth) -> bool:  # TODO: use batchGet
         if not self.__is_actualization_needed():
             return False
         self.logger.info("Start local DB and storage actualization.")
         self.db_conn = db_connect()
         self.__get_last_actualization()
         self.__get_actualization_selection()
-        cursor = self.db_conn.cursor()
         for item in self.actualization_selection:
             media_item = MediaItem(*item)
             try:
                 result = media_item.is_exist_on_server(auth)
-            except SessionNotAuth:
-                auth.refresh_access_token()
-                try:
-                    result = media_item.is_exist_on_server(auth)
-                except (Exception, KeyboardInterrupt):
-                    cursor.execute("INSERT INTO account_info (key, value) "
-                                   "VALUES('last_processed_object_id', ?)", (media_item.id,))
-                    self.db_conn.commit()
-                    raise
             except (Exception, KeyboardInterrupt):
-                cursor.execute("INSERT INTO account_info (key, value) "
-                               "VALUES('last_processed_object_id', ?)", (media_item.id,))
-                self.db_conn.commit()
+                self.__write_last_processed(media_item.id)
                 raise
             if not result:
                 media_item.remove_from_local()
@@ -347,12 +364,8 @@ class LocalStorage:
                 self.logger.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_from_db()
                 continue
-            except SessionNotAuth:
-                auth.refresh_access_token()
-                media_item.get_base_url(auth)
-            except Exception:
-                self.logger.error(f'Fail to update base url by {item[2]}.')
-                raise
+            except VideoNotReady:
+                continue
             try:
                 media_item.download()
             except (FileExistsError, OSError):
@@ -363,9 +376,8 @@ class LocalStorage:
 class Runtime:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info('Started.')
         self.authentication = Authentication()
-        self.metadata = Metadata()
+        self.metadata = MetadataList()
         self.local_storage = LocalStorage()
 
     def __is_db_exists(self) -> bool:
@@ -376,48 +388,40 @@ class Runtime:
             return False
         return True
 
-    def __db_creation(self) -> bool:
+    def __db_creation(self):
         answer = input('Do you want to create new DB?(Y/n)')
         if answer == 'n' or answer == 'N':
             self.logger.warning('Aborted by user.')
-            return False
-        shutil.copy(DB_FILE_PATH + '.structure', DB_FILE_PATH)
-        return True
+            exit(3)
+        try:
+            shutil.copy(DB_FILE_PATH + '.structure', DB_FILE_PATH)
+        except OSError as err:
+            message = f'Fail to create DB.\n{err}'
+            print(message)
+            self.logger.error(message)
+            exit(4)
 
     def main(self):
-        try:
-            self.authentication.authenticate()
-        except Exception as err:
-            self.logger.error(f"Fail to authenticate.\n{err}")
-            exit(5)
+        self.logger.info('Started.')
+        self.authentication.authenticate()
         if not self.__is_db_exists():
-            if not self.__db_creation():
-                exit(0)
+            self.__db_creation()
         try:
             self.metadata.get_metadata_list(self.authentication)
-        except Exception as err:
-            self.logger.error(f"Unexpected error.\n{err}")
-            exit(1)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
-            exit(0)
+            exit(3)
         self.logger.info('Start downloading a list of media items.')
         try:
             self.local_storage.get_media_items(self.authentication)
-        except Exception as err:
-            self.logger.error(f"Fail to download media: {err}")
-            exit(3)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
-            exit(0)
+            exit(3)
         try:
             self.local_storage.find_and_clean_not_existing(self.authentication)
-        except Exception as err:
-            self.logger.error(f'Fail to actualize DB.\n{err}')
-            exit(8)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
-            exit(0)
+            exit(3)
         self.logger.info('Actualization is complete.')
         self.logger.info('Finished.')
 

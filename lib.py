@@ -34,31 +34,32 @@ class MediaItem:
         creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
         self.sub_folder_name = str(creation_year) + '/'
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.db_conn = None
+        self.__db_conn = None
+        self.video_status = None
 
     def write_to_db(self):
-        self.db_conn = db_connect()
-        cursor = self.db_conn.cursor()
+        self.__db_conn = db_connect()
+        cursor = self.__db_conn.cursor()
         values = (self.id, self.filename, self.mime_type, self.creation_time)
         try:
             cursor.execute('INSERT INTO my_media (object_id, filename, media_type, creation_time) '
                            'VALUES (?, ?, ?, ?)', values)
-            self.db_conn.commit()
+            self.__db_conn.commit()
         except sqlite3.IntegrityError:
             raise ObjAlreadyExists(f'Media item {self.filename} already in the DB.')
         except sqlite3.Error as err:
             self.logger.error(f'Fail to write {self.filename} metadata into the DB.\n{err}')
 
     def remove_from_db(self):
-        self.db_conn = db_connect()
-        cursor = self.db_conn.cursor()
+        self.__db_conn = db_connect()
+        cursor = self.__db_conn.cursor()
         try:
             cursor.execute("DELETE FROM my_media WHERE object_id=?", (self.id,))
-            self.db_conn.commit()
+            self.__db_conn.commit()
         except sqlite3.Error as err:
             self.logger.error(f'Fail to remove {self.filename} from the DB.\n{err}')
 
-    def get_base_url(self, auth):  # TODO: Check if video object first
+    def get_base_url(self, auth):
         headers = {'Accept': 'application/json',
                    'Authorization': 'Bearer ' + auth.access_token}
         response = requests.get(SRV_ENDPOINT + 'mediaItems/' + self.id, headers=headers)
@@ -69,15 +70,24 @@ class MediaItem:
             raise FileNotFoundError()
         elif response.status_code != 200:
             raise Exception(f'Response code: {response.status_code}. Response: {response.text}')
+        representation = response.json()
         try:
-            self.base_url = response.json()['baseUrl']
+            if 'video' in self.mime_type:
+                self.video_status = representation['mediaMetadata']['video']['status']
+                if self.video_status != 'READY':
+                    raise VideoNotReady(f'Video {self.filename} is not ready.')
+        except KeyError:
+            self.logger.error(f'Response does not contain video status. Response: {response.text}')
+            raise
+        try:
+            self.base_url = representation['baseUrl']
         except KeyError:
             self.logger.error(f'Response does not contain baseUrl. Response: {response.text}')
             raise
 
     def download(self):
-        self.db_conn = db_connect()
-        cursor = self.db_conn.cursor()
+        self.__db_conn = db_connect()
+        cursor = self.__db_conn.cursor()
         if 'image' in self.mime_type:
             url_suffix = '=d'
             path_to_object = PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename
@@ -94,7 +104,7 @@ class MediaItem:
                 self.logger.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
                                     f"in database.")
                 cursor.execute("UPDATE my_media SET stored='2' WHERE object_id=?", (self.id,))
-                self.db_conn.commit()
+                self.__db_conn.commit()
                 raise FileExistsError()
             try:
                 with open(path_to_object, 'wb') as media_file:
@@ -107,7 +117,7 @@ class MediaItem:
             raise Exception(f"Unexpected content type {response.headers['Content-Type']}")
         self.logger.info(f"Media file {self.filename} stored.")
         cursor.execute("UPDATE my_media SET stored='1' WHERE object_id=?", (self.id,))
-        self.db_conn.commit()
+        self.__db_conn.commit()
 
     def remove_from_local(self):
         if 'video' in self.mime_type:

@@ -31,3 +31,8 @@ class NoNextPageTokenInResp(Exception):
 class FailGettingPage(Exception):
     def __init__(self, message):
         logger.exception(message)
+
+
+class VideoNotReady(Exception):
+    def __init__(self, message):
+        logger.exception(message)
