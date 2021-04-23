@@ -1,38 +1,39 @@
 import logging
 
-logger = logging.getLogger('Exceptions')
+
+class MyExceptions(Exception):
+    def __init__(self, *args):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        if args:
+            self.message = args[0]
+        else:
+            self.message = f'{self.__class__.__name__} has been raised.'
+        self.logger.exception(self.message)
 
 
-class ObjAlreadyExists(Exception):
-    def __init__(self, message):
-        logger.info(message)
+class ObjAlreadyExists(MyExceptions):
+    pass
 
 
-class SessionNotAuth(Exception):
-    def __init__(self, message):
-        logger.warning(message)
+class SessionNotAuth(MyExceptions):
+    pass
 
 
-class DownloadError(Exception):
-    def __init__(self, message):
-        logger.exception(message)
+class DownloadError(MyExceptions):
+    pass
 
 
-class NoItemsInResp(Exception):
-    def __init__(self, message):
-        logger.warning(message)
+class NoItemsInResp(MyExceptions):
+    pass
 
 
-class NoNextPageTokenInResp(Exception):
-    def __init__(self, message):
-        logger.warning(message)
+class NoNextPageTokenInResp(MyExceptions):
+    pass
 
 
-class FailGettingPage(Exception):
-    def __init__(self, message):
-        logger.exception(message)
+class FailGettingPage(MyExceptions):
+    pass
 
 
-class VideoNotReady(Exception):
-    def __init__(self, message):
-        logger.exception(message)
+class VideoNotReady(MyExceptions):
+    pass

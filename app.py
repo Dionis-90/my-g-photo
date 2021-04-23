@@ -149,9 +149,9 @@ class Authentication:
 
 class MetadataList:
     def __init__(self, db_conn):
-        self.new_next_page_token = None
-        self.current_mode = '0'
-        self.list_retrieved = False
+        self.__new_next_page_token = None
+        self.__current_mode = '0'
+        self.__list_retrieved = False
         self.logger = logging.getLogger(self.__class__.__name__)
         self.__db_conn = db_conn
 
@@ -173,9 +173,9 @@ class MetadataList:
         except KeyError:
             raise NoItemsInResp(f"No mediaItems object in response. Response: {response.text}")
         try:
-            self.new_next_page_token = response.json()['nextPageToken']
+            self.__new_next_page_token = response.json()['nextPageToken']
         except KeyError:
-            self.new_next_page_token = None
+            self.__new_next_page_token = None
             raise NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
         return page
 
@@ -195,7 +195,7 @@ class MetadataList:
                 elif mode == 'write_latest':
                     raise
                 else:
-                    raise Exception('Unexpected error.')
+                    raise MyExceptions('Unexpected error.')
 
     def __check_mode(self):
         cursor = self.__db_conn.cursor()
@@ -205,7 +205,7 @@ class MetadataList:
             self.logger.error(f'DB query failed, {err}.')
             raise
         try:
-            self.current_mode = cursor.fetchone()[0]
+            self.__current_mode = cursor.fetchone()[0]
         except TypeError:
             pass
 
@@ -213,18 +213,18 @@ class MetadataList:
         """Gets media metadata from Google Photo server and writes it to the local database."""
         self.__check_mode()
         cursor = self.__db_conn.cursor()
-        self.logger.info(f'Running in mode {self.current_mode}.')
+        self.logger.info(f'Running in mode {self.__current_mode}.')
         pages = 0
         while True:
             try:
-                page = self.__get_page(auth, self.new_next_page_token)
+                page = self.__get_page(auth, self.__new_next_page_token)
             except (NoNextPageTokenInResp, NoItemsInResp):
-                self.list_retrieved = True
+                self.__list_retrieved = True
             except FailGettingPage:
                 break
-            if self.current_mode == '0':
+            if self.__current_mode == '0':
                 self.__write_page(page)
-            elif self.current_mode == '1':
+            elif self.__current_mode == '1':
                 try:
                     self.__write_page(page, mode='write_latest')
                 except ObjAlreadyExists:
@@ -233,7 +233,7 @@ class MetadataList:
                 raise Exception('Unexpected error.')
             pages += 1
             self.logger.info(f'{pages} - processed.')
-            if self.list_retrieved:
+            if self.__list_retrieved:
                 cursor.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
                 self.__db_conn.commit()
                 self.logger.warning("List has been retrieved.")
@@ -244,9 +244,9 @@ class LocalStorage:
     def __init__(self, db_conn):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.__db_conn = db_conn
-        self.download_selection = None
-        self.actualization_selection = None
-        self.last_actualization_date = None
+        self.__download_selection = None
+        self.__actualization_selection = None
+        self.__last_actualization_date = None
 
     def __get_download_selection(self):
         try:
@@ -256,11 +256,11 @@ class LocalStorage:
         except sqlite3.Error as err:
             self.logger.error(f'Fail to communicate with DB.\n{err}')
             raise
-        self.download_selection = cursor.fetchall()
+        self.__download_selection = cursor.fetchall()
 
     def __create_tree(self):
         sub_folders = set()
-        for item in self.download_selection:
+        for item in self.__download_selection:
             year = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
             sub_folders.add(str(year))
         for item in sub_folders:
@@ -290,7 +290,7 @@ class LocalStorage:
             cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE \
                                    stored != '0' and id > (SELECT id FROM my_media WHERE object_id = ?) ORDER BY id",
                            last_local_id_processed[0])
-        self.actualization_selection = cursor.fetchall()
+        self.__actualization_selection = cursor.fetchall()
 
     def __get_last_actualization(self):
         cursor = self.__db_conn.cursor()
@@ -298,15 +298,15 @@ class LocalStorage:
         self.__db_conn.commit()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_actualization'")
         try:
-            self.last_actualization_date = cursor.fetchone()[0]
+            self.__last_actualization_date = cursor.fetchone()[0]
         except TypeError:
             pass
 
-    def __is_actualization_needed(self) -> bool:
-        if not self.last_actualization_date:
+    def is_actualization_needed(self) -> bool:
+        if not self.__last_actualization_date:
             return True
         difference = datetime.datetime.now() - \
-            datetime.datetime.strptime(self.last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
+            datetime.datetime.strptime(self.__last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
         difference = difference.days
         if difference < ACTUALIZATION_PERIOD:
             return False
@@ -324,13 +324,11 @@ class LocalStorage:
                        "VALUES('last_processed_object_id', ?)", (item_id,))
         self.__db_conn.commit()
 
-    def find_and_clean_not_existing(self, auth) -> bool:  # TODO: use batchGet
-        if not self.__is_actualization_needed():
-            return False
+    def remove_not_existing(self, auth) -> bool:  # TODO: use batchGet
         self.logger.info("Start local DB and storage actualization.")
         self.__get_last_actualization()
         self.__get_actualization_selection()
-        for item in self.actualization_selection:
+        for item in self.__actualization_selection:
             media_item = MediaItem(*item)
             try:
                 result = media_item.is_exist_on_server(auth)
@@ -344,7 +342,7 @@ class LocalStorage:
         self.__set_last_actualization_date()
         return True
 
-    def get_media_items(self, auth):
+    def download_media_items(self, auth):
         """Downloads media items that listed in the database putting it by years folder."""
         self.__get_download_selection()
         try:
@@ -352,7 +350,7 @@ class LocalStorage:
         except OSError:
             self.logger.error("Please check storage paths in config.")
             raise
-        for item in self.download_selection:
+        for item in self.__download_selection:
             media_item = MediaItem(*item)
             try:
                 media_item.get_base_url(auth)
@@ -369,7 +367,7 @@ class LocalStorage:
         self.logger.info('Getting media items is complete.')
 
 
-class Runtime:
+class Main:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.__is_db_exists():
@@ -405,24 +403,18 @@ class Runtime:
         self.authentication.authenticate()
         try:
             self.metadata.get_metadata_list(self.authentication)
+            self.logger.info('Start downloading a list of media items.')
+            self.local_storage.download_media_items(self.authentication)
+            if self.local_storage.is_actualization_needed():
+                self.local_storage.remove_not_existing(self.authentication)
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
             exit(3)
-        self.logger.info('Start downloading a list of media items.')
-        try:
-            self.local_storage.get_media_items(self.authentication)
-        except KeyboardInterrupt:
-            self.logger.warning("Aborted by user.")
-            exit(3)
-        try:
-            self.local_storage.find_and_clean_not_existing(self.authentication)
-        except KeyboardInterrupt:
-            self.logger.warning("Aborted by user.")
-            exit(3)
+        finally:
+            self.db_conn.close()
         self.logger.info('Actualization is complete.')
-        self.db_conn.close()
         self.logger.info('Finished.')
 
 
 if __name__ == '__main__':
-    Runtime().main()
+    Main().main()

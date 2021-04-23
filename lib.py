@@ -5,7 +5,7 @@ import os
 from config import *
 from exceptions import *
 
-logging.basicConfig(format='%(asctime)s %(levelname)s %(funcName)s: %(message)s',
+logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
                     filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
