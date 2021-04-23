@@ -17,13 +17,13 @@ SCOPES = [
 
 
 class Authentication:
-    def __init__(self):
+    def __init__(self, db_conn):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.identity_data = None
         self.__access_token = None
         self.__refresh_token = None
         self.__refresh_token_time = None
-        self.__db_conn = None
+        self.__db_conn = db_conn
 
     @property
     def __url(self):
@@ -118,7 +118,6 @@ class Authentication:
         self.logger.info('Token has been refreshed.')
 
     def authenticate(self):
-        self.__db_conn = db_connect()
         self.__read_identity_data()
         if self.__is_authenticated():
             self.__read_latest_token()
@@ -149,12 +148,12 @@ class Authentication:
 
 
 class MetadataList:
-    def __init__(self):
+    def __init__(self, db_conn):
         self.new_next_page_token = None
         self.current_mode = '0'
         self.list_retrieved = False
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.db_conn = None
+        self.__db_conn = db_conn
 
     def __get_page(self, auth, next_page_token) -> json:
         url = SRV_ENDPOINT + 'mediaItems'
@@ -199,7 +198,7 @@ class MetadataList:
                     raise Exception('Unexpected error.')
 
     def __check_mode(self):
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         try:
             cursor.execute("SELECT value FROM account_info WHERE key='list_received'")
         except sqlite3.Error as err:
@@ -212,9 +211,8 @@ class MetadataList:
 
     def get_metadata_list(self, auth):
         """Gets media metadata from Google Photo server and writes it to the local database."""
-        self.db_conn = db_connect()
         self.__check_mode()
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         self.logger.info(f'Running in mode {self.current_mode}.')
         pages = 0
         while True:
@@ -237,22 +235,22 @@ class MetadataList:
             self.logger.info(f'{pages} - processed.')
             if self.list_retrieved:
                 cursor.execute("UPDATE account_info SET value='1' WHERE key='list_received'")
-                self.db_conn.commit()
+                self.__db_conn.commit()
                 self.logger.warning("List has been retrieved.")
                 break
 
 
 class LocalStorage:
-    def __init__(self):
+    def __init__(self, db_conn):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.db_conn = None
+        self.__db_conn = db_conn
         self.download_selection = None
         self.actualization_selection = None
         self.last_actualization_date = None
 
     def __get_download_selection(self):
         try:
-            cursor = self.db_conn.cursor()
+            cursor = self.__db_conn.cursor()
             cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media "
                            "WHERE stored = '0' ORDER BY creation_time DESC")
         except sqlite3.Error as err:
@@ -282,7 +280,7 @@ class LocalStorage:
                 self.logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def __get_actualization_selection(self):
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_processed_object_id'")
         last_local_id_processed = cursor.fetchall()
         if not last_local_id_processed:
@@ -295,9 +293,9 @@ class LocalStorage:
         self.actualization_selection = cursor.fetchall()
 
     def __get_last_actualization(self):
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         cursor.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
-        self.db_conn.commit()
+        self.__db_conn.commit()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_actualization'")
         try:
             self.last_actualization_date = cursor.fetchone()[0]
@@ -315,22 +313,21 @@ class LocalStorage:
         return True
 
     def __set_last_actualization_date(self):
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         now = datetime.datetime.today().strftime("%Y-%m-%dT%H:%M:%SZ")
         cursor.execute(f"INSERT OR REPLACE INTO account_info (key, value) VALUES ('last_actualization', '{now}')")
-        self.db_conn.commit()
+        self.__db_conn.commit()
 
     def __write_last_processed(self, item_id):
-        cursor = self.db_conn.cursor()
+        cursor = self.__db_conn.cursor()
         cursor.execute("INSERT INTO account_info (key, value) "
                        "VALUES('last_processed_object_id', ?)", (item_id,))
-        self.db_conn.commit()
+        self.__db_conn.commit()
 
     def find_and_clean_not_existing(self, auth) -> bool:  # TODO: use batchGet
         if not self.__is_actualization_needed():
             return False
         self.logger.info("Start local DB and storage actualization.")
-        self.db_conn = db_connect()
         self.__get_last_actualization()
         self.__get_actualization_selection()
         for item in self.actualization_selection:
@@ -349,7 +346,6 @@ class LocalStorage:
 
     def get_media_items(self, auth):
         """Downloads media items that listed in the database putting it by years folder."""
-        self.db_conn = db_connect()
         self.__get_download_selection()
         try:
             self.__create_tree()
@@ -376,9 +372,12 @@ class LocalStorage:
 class Runtime:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.authentication = Authentication()
-        self.metadata = MetadataList()
-        self.local_storage = LocalStorage()
+        if not self.__is_db_exists():
+            self.__db_creation()
+        self.db_conn = db_connect()
+        self.authentication = Authentication(self.db_conn)
+        self.metadata = MetadataList(self.db_conn)
+        self.local_storage = LocalStorage(self.db_conn)
 
     def __is_db_exists(self) -> bool:
         if not os.path.exists(DB_FILE_PATH):
@@ -404,8 +403,6 @@ class Runtime:
     def main(self):
         self.logger.info('Started.')
         self.authentication.authenticate()
-        if not self.__is_db_exists():
-            self.__db_creation()
         try:
             self.metadata.get_metadata_list(self.authentication)
         except KeyboardInterrupt:
@@ -423,6 +420,7 @@ class Runtime:
             self.logger.warning("Aborted by user.")
             exit(3)
         self.logger.info('Actualization is complete.')
+        self.db_conn.close()
         self.logger.info('Finished.')
 
 
