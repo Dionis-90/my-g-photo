@@ -1,7 +1,7 @@
 import logging
 
 
-class MyBaseException(Exception):
+class MyGPhotoException(Exception):
     def __init__(self, *args):
         self.logger = logging.getLogger(self.__class__.__name__)
         if args:
@@ -10,43 +10,43 @@ class MyBaseException(Exception):
             self.message = f'{self.__class__.__name__} has been raised.'
 
 
-class ObjAlreadyExists(MyBaseException):
+class ObjAlreadyExists(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.info(self.message)
 
 
-class SessionNotAuth(MyBaseException):
+class SessionNotAuth(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.error(self.message)
 
 
-class DownloadError(MyBaseException):
+class DownloadError(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.warning(self.message)
 
 
-class NoItemsInResp(MyBaseException):
+class NoItemsInResp(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.info(self.message)
 
 
-class NoNextPageTokenInResp(MyBaseException):
+class NoNextPageTokenInResp(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.warning(self.message)
 
 
-class FailGettingPage(MyBaseException):
+class FailGettingPage(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.exception(self.message)
 
 
-class VideoNotReady(MyBaseException):
+class VideoNotReady(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.warning(self.message)

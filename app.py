@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 # This is an application that gets, downloads media files and metadata from your Google Photo storage to your
 # local storage.
 
@@ -16,7 +16,7 @@ SCOPES = [
           ]
 
 
-class Authentication:
+class Authentication:  # TODO: write access_token to the DB instead the file
     def __init__(self, db_conn):
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.__identity_data = None
@@ -52,7 +52,7 @@ class Authentication:
 
     def __is_authenticated(self) -> bool:
         try:
-            self.__get_tokens()
+            self.__read_tokens()
         except FileNotFoundError:
             return False
         return True
@@ -66,7 +66,7 @@ class Authentication:
             return False
         return True
 
-    def __get_tokens(self):
+    def __read_tokens(self):
         try:
             with open(OAUTH2_FILE_PATH) as file:
                 oauth_file_data = json.load(file)
@@ -158,7 +158,7 @@ class MetadataList:
 
     def __get_page(self, auth, next_page_token):
         url = SRV_ENDPOINT + 'mediaItems'
-        objects_count_on_page = '2'
+        objects_count_on_page = '100'
         params = {'pageSize': objects_count_on_page,
                   'pageToken': next_page_token}
         representation = make_request_w_auth(auth.access_token, url, params)
@@ -187,7 +187,7 @@ class MetadataList:
                 elif mode == 'write_latest':
                     raise
                 else:
-                    raise MyBaseException('Unexpected error.')
+                    raise MyGPhotoException('Unexpected error.')
 
     def __check_mode(self):
         cursor = self.__db_conn.cursor()
@@ -201,10 +201,15 @@ class MetadataList:
         except TypeError:
             pass
 
-    def get_by_ids(self, ids: tuple, auth):
-        url = SRV_ENDPOINT + 'mediaItems:batchGet'
-        params = {'mediaItemIds': i for i in ids}
-        representation = make_request_w_auth(auth.access_token, url, params=params)
+    @staticmethod
+    def get_items_by_ids(ids: tuple, auth) -> list:
+        url = SRV_ENDPOINT + 'mediaItems:batchGet?' + ''.join('mediaItemIds=' + i + '&' for i in ids)
+        representation = make_request_w_auth(auth.access_token, url)
+        try:
+            items = representation['mediaItemResults']
+        except KeyError:
+            raise NoItemsInResp()
+        return items
 
     def get_metadata_list(self, auth):
         """Gets media metadata from Google Photo server and writes it to the local database."""
@@ -275,7 +280,7 @@ class LocalStorage:
                     raise
                 self.__logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
-    def __get_actualization_selection(self):
+    def __get_actualization_selection(self, limit=5, start_from=None):  # TODO
         cursor = self.__db_conn.cursor()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_processed_object_id'")
         last_local_id_processed = cursor.fetchall()
@@ -400,6 +405,14 @@ class Main:
             self.metadata.get_metadata_list(self.authentication)
             self.logger.info('Start downloading a list of media items.')
             self.local_storage.download_media_items(self.authentication)
+            # For testing maybe=========>
+            # self.metadata.get_items_by_ids(
+            #    ('AOrhRz6_TXeXp9ZUH278oCwL0g7Df7UaEwjHdrpJ8hD2eJg7nB3TK6Sf5Wj011eG42c4c_xKlvDZOqAsZDHHd4QPGa1cgEsc4A',
+            #     'AOrhRz4w4HBXKfBvDswN9WDtbM-TwcieQj1l74Aj5tCK9sEN23QVoLiL_6iVOd7ARn2c5CW1S76yVLsjSd1sRtn7kpimctfr4w',
+            #     'AOrhRz7jJd4KI_XKFxm0-GiSh7CbarOElRjKOo2q_aFL2k5bjgnPxG8B6g1RNHRg7aPl0T3Awx9a-s7-1w6Nh9IeZE4Bikt0Zw'),
+            #    self.authentication
+            # )
+            # <================
             if self.local_storage.is_actualization_needed():
                 self.logger.info("Start local DB and storage actualization.")
                 self.local_storage.remove_not_existing(self.authentication)

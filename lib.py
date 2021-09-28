@@ -9,7 +9,7 @@ logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(m
                     filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
-def db_connect():
+def db_connect() -> sqlite3.Connection:
     db_logger = logging.getLogger('DB connection')
     try:
         db_conn = sqlite3.connect(DB_FILE_PATH)
@@ -30,7 +30,7 @@ def make_request_w_auth(access_token, url, params=None):
     elif response.status_code == 404:
         raise FileNotFoundError()
     elif response.status_code != 200:
-        raise MyBaseException(f'Response code: {response.status_code}. Response: {response.text}')
+        raise MyGPhotoException(f'Response code: {response.status_code}. Response: {response.text}')
     try:
         representation = response.json()
     except ValueError:
