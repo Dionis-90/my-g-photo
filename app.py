@@ -419,7 +419,8 @@ class Main:
                 self.logger.info('Actualization is complete.')
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
-            exit(3)
+        except Exception as err:
+            self.logger.exception(f'Something went wrong.\n{err}')
         finally:
             self.db_conn.close()
         self.logger.info('Finished.')
