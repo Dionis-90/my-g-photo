@@ -2,11 +2,11 @@
 # This is an application that gets, downloads media files and metadata from your Google Photo storage to your
 # local storage.
 
-import json
-import webbrowser
 import shutil
-import time
 from lib import *
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = [
     'https://www.googleapis.com/auth/photoslibrary.readonly',
@@ -16,135 +16,30 @@ SCOPES = [
           ]
 
 
-class Authentication:  # TODO: write access_token to the DB instead the file
-    def __init__(self, db_conn):
+class Authentication:
+    def __init__(self):
+        self.creds = None
         self.__logger = logging.getLogger(self.__class__.__name__)
-        self.__identity_data = None
-        self.__access_token = None
-        self.__refresh_token = None
-        self.__refresh_token_time = None
-        self.__db_conn = db_conn
 
     @property
-    def __url(self):
-        scopes_for_uri = ''.join(i + '%20' for i in SCOPES)
-        return f"{self.__identity_data['auth_uri']}?scope={scopes_for_uri}&response_type=code&" \
-               f"redirect_uri={self.__identity_data['redirect_uris'][0]}&client_id={self.__identity_data['client_id']}"
+    def access_token(self) -> str:
+        if os.path.exists(ACCESS_TOKEN_FILE_PATH):
+            self.creds = Credentials.from_authorized_user_file(ACCESS_TOKEN_FILE_PATH, SCOPES)
+        if not self.creds or not self.creds.valid:
+            if self.creds and self.creds.expired and self.creds.refresh_token:
+                self.creds.refresh(Request())
+                self.__logger.info('Access token refreshed.')
+            else:
+                self.__get_auth()
+        return self.creds.token
 
-    @property
-    def access_token(self):
-        now = time.time()
-        difference = int(now) - int(self.__refresh_token_time)
-        if difference > 3599:
-            self.__refresh_access_token()
-        return self.__access_token
-
-    def __read_identity_data(self):
-        try:
-            with open(IDENTITY_FILE_PATH) as file_data:
-                self.__identity_data = json.load(file_data)['installed']
-        except OSError as err:
-            self.__logger.error(f'Error while reading {IDENTITY_FILE_PATH}.\n{err}')
-            raise
-        except KeyError:
-            self.__logger.error(f"Invalid {IDENTITY_FILE_PATH} file.")
-            raise
-
-    def __is_authenticated(self) -> bool:
-        try:
-            self.__read_tokens()
-        except FileNotFoundError:
-            return False
-        return True
-
-    def __get_token_time(self):
-        cursor = self.__db_conn.cursor()
-        cursor.execute("SELECT value FROM account_info WHERE key='token_refreshed'")
-        try:
-            self.__refresh_token_time = cursor.fetchone()[0]
-        except TypeError:
-            return False
-        return True
-
-    def __read_tokens(self):
-        try:
-            with open(OAUTH2_FILE_PATH) as file:
-                oauth_file_data = json.load(file)
-                self.__refresh_token = oauth_file_data['refresh_token']
-                self.__access_token = oauth_file_data['access_token']
-        except FileNotFoundError:
-            self.__logger.warning('Authentication require.')
-            raise
-        except OSError as err:
-            self.__logger.error(f'Fail to read {OAUTH2_FILE_PATH}.\n{err}')
-            raise
-        except KeyError as err:
-            self.__logger.error(f'File does not contain tokens.\n{err}')
-            raise
-
-    def __read_latest_token(self):
-        if not os.path.exists(ACCESS_TOKEN_FILE):
-            return True
-        with open(ACCESS_TOKEN_FILE) as file:
-            file_content = file.read()
-            try:
-                self.__access_token = json.loads(file_content)['access_token']
-            except KeyError:
-                self.__logger.error(f'File {ACCESS_TOKEN_FILE} exists but does not contain the access token, '
-                                    f'{file_content}')
-                raise
-
-    def __set_token_time_now(self):
-        cursor = self.__db_conn.cursor()
-        now = int(time.time())
-        self.__refresh_token_time = str(now)
-        cursor.execute("INSERT OR REPLACE INTO `account_info` (key, value) VALUES ('token_refreshed', ?)", (str(now),))
-        self.__db_conn.commit()
-
-    def __refresh_access_token(self):
-        values = {'client_id': self.__identity_data['client_id'],
-                  'client_secret': self.__identity_data['client_secret'],
-                  'refresh_token': self.__refresh_token,
-                  'grant_type': 'refresh_token'}
-        response = requests.post(self.__identity_data['token_uri'], data=values)
-        try:
-            with open(ACCESS_TOKEN_FILE, 'w') as f:
-                json.dump(response.json(), f)
-        except OSError as err:
-            self.__logger.error(f"Fail to write the access token to {ACCESS_TOKEN_FILE} file, {err}")
-            raise
-        self.__access_token = response.json()['access_token']
-        self.__set_token_time_now()
-        self.__logger.info('Token has been refreshed.')
-
-    def authenticate(self):
-        self.__read_identity_data()
-        if self.__is_authenticated():
-            self.__read_latest_token()
-            if not self.__get_token_time():
-                self.__refresh_access_token()
-            return True
-        print(f"If you do not have local browser please visit url: {self.__url}")
-        webbrowser.open(self.__url, new=0, autoraise=True)
-        code = input("Please enter the code: ")
-        data = {'code': code,
-                'client_id': self.__identity_data['client_id'],
-                'client_secret': self.__identity_data['client_secret'],
-                'redirect_uri': self.__identity_data['redirect_uris'][0],
-                'grant_type': 'authorization_code'}
-        response = requests.post(self.__identity_data['token_uri'], data=data)
-        if response.status_code != 200:
-            raise SessionNotAuth(f"http code: {response.status_code}, response: {response.text}.")
-        try:
-            with open(OAUTH2_FILE_PATH, 'w') as file:
-                json.dump(response.json(), file)
-        except OSError as err:
-            self.__logger.error(f'Error while writing {OAUTH2_FILE_PATH}.\n{err}')
-            raise
-        self.__access_token = response.json()['access_token']
-        self.__refresh_token = response.json()['refresh_token']
-        self.__set_token_time_now()
-        self.__logger.warning("Authenticated successfully.")
+    def __get_auth(self):
+        flow = InstalledAppFlow.from_client_secrets_file(
+            IDENTITY_FILE_PATH, SCOPES)
+        self.creds = flow.run_local_server(port=0)
+        self.__logger.info('Successfully authenticated.')
+        with open(ACCESS_TOKEN_FILE_PATH, 'w') as token:
+            token.write(self.creds.to_json())
 
 
 class MetadataList:
@@ -343,7 +238,7 @@ class LocalStorage:
         return True
 
     def download_media_items(self, auth):
-        """Downloads media items that listed in the database putting it by years folder."""
+        """Downloads media items that listed in the database putting it by year's folder."""
         self.__get_download_selection()
         try:
             self.__create_tree()
@@ -373,7 +268,7 @@ class Main:
         if not self.__is_db_exists():
             self.__db_creation()
         self.db_conn = db_connect()
-        self.authentication = Authentication(self.db_conn)
+        self.authentication = Authentication()
         self.metadata = MetadataList(self.db_conn)
         self.local_storage = LocalStorage(self.db_conn)
 
@@ -400,7 +295,6 @@ class Main:
 
     def main(self):
         self.logger.info('Started.')
-        self.authentication.authenticate()
         try:
             self.metadata.get_metadata_list(self.authentication)
             self.logger.info('Start downloading a list of media items.')
