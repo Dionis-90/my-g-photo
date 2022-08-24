@@ -22,24 +22,28 @@ class Authentication:
         self.__logger = logging.getLogger(self.__class__.__name__)
 
     @property
-    def access_token(self) -> str:
+    def access_token(self) -> str:  # TODO improve logic
         if os.path.exists(ACCESS_TOKEN_FILE_PATH):
             self.creds = Credentials.from_authorized_user_file(ACCESS_TOKEN_FILE_PATH, SCOPES)
         if not self.creds or not self.creds.valid:
             if self.creds and self.creds.expired and self.creds.refresh_token:
                 self.creds.refresh(Request())
+                self.__write_access_token_to_file()
                 self.__logger.info('Access token refreshed.')
             else:
                 self.__get_auth()
         return self.creds.token
+
+    def __write_access_token_to_file(self):
+        with open(ACCESS_TOKEN_FILE_PATH, 'w') as token:
+            token.write(self.creds.to_json())
 
     def __get_auth(self):
         flow = InstalledAppFlow.from_client_secrets_file(
             IDENTITY_FILE_PATH, SCOPES)
         self.creds = flow.run_local_server(port=0)
         self.__logger.info('Successfully authenticated.')
-        with open(ACCESS_TOKEN_FILE_PATH, 'w') as token:
-            token.write(self.creds.to_json())
+        self.__write_access_token_to_file()
 
 
 class MetadataList:
