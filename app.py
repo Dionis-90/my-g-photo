@@ -22,16 +22,18 @@ class Authentication:
         self.__logger = logging.getLogger(self.__class__.__name__)
 
     @property
-    def access_token(self) -> str:  # TODO improve logic
-        if os.path.exists(ACCESS_TOKEN_FILE_PATH):
-            self.creds = Credentials.from_authorized_user_file(ACCESS_TOKEN_FILE_PATH, SCOPES)
-        if not self.creds or not self.creds.valid:
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-                self.__write_access_token_to_file()
-                self.__logger.info('Access token refreshed.')
+    def access_token(self) -> str:
+        if not self.creds:
+            if os.path.exists(ACCESS_TOKEN_FILE_PATH):
+                self.creds = Credentials.from_authorized_user_file(ACCESS_TOKEN_FILE_PATH, SCOPES)
             else:
                 self.__get_auth()
+        if self.creds.expired:
+            self.creds.refresh(Request())
+            self.__write_access_token_to_file()
+            self.__logger.info('Access token refreshed.')
+        if not self.creds.valid:
+            raise AuthUnsuccessful()
         return self.creds.token
 
     def __write_access_token_to_file(self):

@@ -50,3 +50,9 @@ class VideoNotReady(MyGPhotoException):
     def __init__(self, *args):
         super().__init__(*args)
         self.logger.warning(self.message)
+
+
+class AuthUnsuccessful(MyGPhotoException):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.logger.exception(self.message)
