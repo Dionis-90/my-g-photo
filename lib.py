@@ -108,7 +108,8 @@ class MediaItem:
             raise Exception('Unexpected mime type.')
         response = requests.get(self.base_url + url_suffix, params=None, headers=None, stream=True)
         if 'text/html' in response.headers['Content-Type']:
-            raise DownloadError(f"Fail to download {self.filename}. Server returns: {response.text}")
+            raise DownloadError(f"Fail to download {self.filename}. "
+                                f"Server returns: {response.text}, http code {response.status_code}")
         elif 'image' in response.headers['Content-Type'] or 'video' in response.headers['Content-Type']:
             if os.path.exists(path_to_object):
                 self.__logger.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "

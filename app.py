@@ -3,6 +3,8 @@
 # local storage.
 
 import shutil
+import time
+
 from lib import *
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -13,7 +15,7 @@ SCOPES = [
     # 'https://www.googleapis.com/auth/photoslibrary',
     # 'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
     # 'https://www.googleapis.com/auth/photoslibrary.sharing',
-          ]
+]
 
 
 class Authentication:
@@ -265,6 +267,8 @@ class LocalStorage:
                 media_item.download()
             except (FileExistsError, OSError):
                 continue
+            except DownloadError:
+                time.sleep(30)
         self.__logger.info('Getting media items is complete.')
 
 
