@@ -9,6 +9,7 @@ from lib import *
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from time import sleep
 
 SCOPES = [
     'https://www.googleapis.com/auth/photoslibrary.readonly',
@@ -331,4 +332,6 @@ class Main:
 
 
 if __name__ == '__main__':
-    Main().main()
+    while True:
+        Main().main()
+        sleep(300)

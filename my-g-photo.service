@@ -1,0 +1,8 @@
+[Unit]
+Description=My-G-Photo Service
+After=network.target
+[Service]
+ExecStart=/opt/my-g-photo/app.py
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
