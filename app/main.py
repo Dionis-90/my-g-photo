@@ -4,6 +4,7 @@ import shutil
 
 from tools.media import *
 from tools.helpers import *
+from config.config import *
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -15,6 +16,9 @@ SCOPES = [
     # 'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
     # 'https://www.googleapis.com/auth/photoslibrary.sharing',
 ]
+
+logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
+                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
 class Authentication:
@@ -80,7 +84,8 @@ class MetadataList:
         """
         for item in self.__page:
             media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
-                                   item['mediaMetadata']['creationTime'], self.__db_conn)
+                                   item['mediaMetadata']['creationTime'], self.__db_conn,
+                                   PATH_TO_VIDEOS_STORAGE, PATH_TO_IMAGES_STORAGE)
             try:
                 media_item.write_to_db()
             except ObjAlreadyExists:

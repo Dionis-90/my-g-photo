@@ -3,18 +3,17 @@ import datetime
 
 from .helpers import *
 from .exceptions import *
-from app.config.config import *
 
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 
-logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
-
 
 class MediaItem:
-    def __init__(self, item_id, mime_type, filename, creation_time, db_conn):
+    def __init__(self, item_id, mime_type, filename, creation_time, db_conn, path_to_videos_storage,
+                 path_to_images_storage):
         self.id = item_id
         self.base_url = None
+        self.image_storage = path_to_images_storage
+        self.video_storage = path_to_videos_storage
         self.mime_type = mime_type
         self.filename = filename
         self.creation_time = creation_time
@@ -69,10 +68,10 @@ class MediaItem:
         cursor = self.__db_conn.cursor()
         if 'image' in self.mime_type:
             url_suffix = '=d'
-            path_to_object = PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename
+            path_to_object = self.image_storage + self.sub_folder_name + self.filename
         elif 'video' in self.mime_type:
             url_suffix = '=dv'
-            path_to_object = PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename
+            path_to_object = self.video_storage + self.sub_folder_name + self.filename
         else:
             raise Exception('Unexpected mime type.')
         response = requests.get(self.base_url + url_suffix, params=None, headers=None, stream=True)
@@ -101,9 +100,9 @@ class MediaItem:
 
     def remove_from_local(self):
         if 'video' in self.mime_type:
-            path_to_file = PATH_TO_VIDEOS_STORAGE + self.sub_folder_name + self.filename
+            path_to_file = self.video_storage + self.sub_folder_name + self.filename
         elif 'image' in self.mime_type:
-            path_to_file = PATH_TO_IMAGES_STORAGE + self.sub_folder_name + self.filename
+            path_to_file = self.image_storage + self.sub_folder_name + self.filename
         else:
             raise Exception('Unexpected error.')
         try:
