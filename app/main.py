@@ -1,5 +1,4 @@
 import shutil
-
 import logging
 import os
 import sqlite3
@@ -18,9 +17,6 @@ SCOPES = [
     # 'https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata',
     # 'https://www.googleapis.com/auth/photoslibrary.sharing',
 ]
-
-logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
-                    filename=config.LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
 class Authentication:
@@ -281,6 +277,9 @@ class LocalStorage:
 
 class Main:
     def __init__(self):
+        logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
+                            filename=config.LOG_FILE_PATH,
+                            filemode='a', level=logging.INFO)
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.__is_db_exists():
             self.__db_creation()
@@ -303,7 +302,7 @@ class Main:
             self.logger.warning('Aborted by user.')
             exit(3)
         try:
-            shutil.copy('../db/db.sqlite.structure', config.DB_FILE_PATH)
+            shutil.copy('db/db.sqlite.structure', config.DB_FILE_PATH)
         except OSError as err:
             message = f'Fail to create DB.\n{err}'
             print(message)
