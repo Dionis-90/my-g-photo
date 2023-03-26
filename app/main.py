@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-# This is an application that gets, downloads media files and metadata from your Google Photo storage to your
-# local storage.
 
 import shutil
-import time
 
-from lib import *
+from tools.media import *
+from tools.helpers import *
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -269,7 +267,7 @@ class LocalStorage:
             except (FileExistsError, OSError):
                 continue
             except DownloadError:
-                time.sleep(30)
+                sleep(30)
         self.__logger.info('Getting media items is complete.')
 
 
@@ -297,7 +295,7 @@ class Main:
             self.logger.warning('Aborted by user.')
             exit(3)
         try:
-            shutil.copy('db.sqlite.structure', DB_FILE_PATH)
+            shutil.copy('../db/db.sqlite.structure', DB_FILE_PATH)
         except OSError as err:
             message = f'Fail to create DB.\n{err}'
             print(message)
@@ -305,7 +303,7 @@ class Main:
             exit(4)
 
     def main(self):
-        self.logger.info('Started.')
+        self.logger.info('Starting...')
         try:
             self.metadata.get_metadata_list(self.authentication)
             self.logger.info('Start downloading a list of media items.')
@@ -324,6 +322,7 @@ class Main:
                 self.logger.info('Actualization is complete.')
         except KeyboardInterrupt:
             self.logger.warning("Aborted by user.")
+            raise
         except Exception as err:
             self.logger.exception(f'Something went wrong.\n{err}')
         finally:

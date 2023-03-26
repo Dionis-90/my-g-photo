@@ -1,9 +1,8 @@
 .idea
 venv
-storage.json
 *.log
 *.sqlite
 media/*
 __*__
-config.py
-token.json
+config/config.py
+identity/token.json
