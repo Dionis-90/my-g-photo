@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
-
 import shutil
 
-from tools.media import *
-from tools.helpers import *
-from config.config import *
+import logging
+import os
+import sqlite3
+
+from datetime import datetime
+from app.tools import media, exceptions, helpers
+from app.config import config
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -18,7 +20,7 @@ SCOPES = [
 ]
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s %(funcName)s: %(message)s',
-                    filename=LOG_FILE_PATH, filemode='a', level=logging.INFO)
+                    filename=config.LOG_FILE_PATH, filemode='a', level=logging.INFO)
 
 
 class Authentication:
@@ -29,8 +31,8 @@ class Authentication:
     @property
     def access_token(self) -> str:
         if not self.creds:
-            if os.path.exists(ACCESS_TOKEN_FILE_PATH):
-                self.creds = Credentials.from_authorized_user_file(ACCESS_TOKEN_FILE_PATH, SCOPES)
+            if os.path.exists(config.ACCESS_TOKEN_FILE_PATH):
+                self.creds = Credentials.from_authorized_user_file(config.ACCESS_TOKEN_FILE_PATH, SCOPES)
             else:
                 self.__get_auth()
         if self.creds.expired:
@@ -38,16 +40,16 @@ class Authentication:
             self.__write_access_token_to_file()
             self.__logger.info('Access token refreshed.')
         if not self.creds.valid:
-            raise AuthUnsuccessful()
+            raise exceptions.AuthUnsuccessful()
         return self.creds.token
 
     def __write_access_token_to_file(self):
-        with open(ACCESS_TOKEN_FILE_PATH, 'w') as token:
+        with open(config.ACCESS_TOKEN_FILE_PATH, 'w') as token:
             token.write(self.creds.to_json())
 
     def __get_auth(self):
         flow = InstalledAppFlow.from_client_secrets_file(
-            IDENTITY_FILE_PATH, SCOPES)
+            config.IDENTITY_FILE_PATH, SCOPES)
         self.creds = flow.run_local_server(port=0)
         self.__logger.info('Successfully authenticated.')
         self.__write_access_token_to_file()
@@ -63,38 +65,38 @@ class MetadataList:
         self.__db_conn = db_conn
 
     def __get_page(self, auth, next_page_token):
-        url = SRV_ENDPOINT + 'mediaItems'
+        url = media.SRV_ENDPOINT + 'mediaItems'
         objects_count_on_page = '100'
         params = {'pageSize': objects_count_on_page,
                   'pageToken': next_page_token}
-        representation = make_request_w_auth(auth.access_token, url, params)
+        representation = helpers.make_request_w_auth(auth.access_token, url, params)
         try:
             self.__page = representation['mediaItems']
         except KeyError:
-            raise NoItemsInResp(f"No mediaItems object in response. Response: {representation}")
+            raise exceptions.NoItemsInResp(f"No mediaItems object in response. Response: {representation}")
         try:
             self.__new_next_page_token = representation['nextPageToken']
         except KeyError:
             self.__new_next_page_token = None
-            raise NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
+            raise exceptions.NoNextPageTokenInResp("No nextPageToken object in response. Probably got end of the list.")
 
     def __write_page(self, mode='write_all'):
         """
         :param mode: 'write_all' or 'write_latest'
         """
         for item in self.__page:
-            media_item = MediaItem(item['id'], item['mimeType'], item['filename'],
-                                   item['mediaMetadata']['creationTime'], self.__db_conn,
-                                   PATH_TO_VIDEOS_STORAGE, PATH_TO_IMAGES_STORAGE)
+            media_item = media.Item(item['id'], item['mimeType'], item['filename'],
+                                    item['mediaMetadata']['creationTime'], self.__db_conn,
+                                    config.PATH_TO_VIDEOS_STORAGE, config.PATH_TO_IMAGES_STORAGE)
             try:
                 media_item.write_to_db()
-            except ObjAlreadyExists:
+            except exceptions.ObjAlreadyExists:
                 if mode == 'write_all':
                     continue
                 elif mode == 'write_latest':
                     raise
                 else:
-                    raise MyGPhotoException('Unexpected error.')
+                    raise exceptions.MyGPhotoException('Unexpected error.')
 
     def __check_mode(self):
         cursor = self.__db_conn.cursor()
@@ -110,12 +112,12 @@ class MetadataList:
 
     @staticmethod
     def get_items_by_ids(ids: tuple, auth) -> list:
-        url = SRV_ENDPOINT + 'mediaItems:batchGet?' + ''.join('mediaItemIds=' + i + '&' for i in ids)
-        representation = make_request_w_auth(auth.access_token, url)
+        url = media.SRV_ENDPOINT + 'mediaItems:batchGet?' + ''.join('mediaItemIds=' + i + '&' for i in ids)
+        representation = helpers.make_request_w_auth(auth.access_token, url)
         try:
             items = representation['mediaItemResults']
         except KeyError:
-            raise NoItemsInResp()
+            raise exceptions.NoItemsInResp()
         return items
 
     def get_metadata_list(self, auth):
@@ -126,16 +128,16 @@ class MetadataList:
         while True:
             try:
                 self.__get_page(auth, self.__new_next_page_token)
-            except (NoItemsInResp, NoNextPageTokenInResp):
+            except (exceptions.NoItemsInResp, exceptions.NoNextPageTokenInResp):
                 self.__list_retrieved = True
-            except FailGettingPage:
+            except exceptions.FailGettingPage:
                 break
             if self.__current_mode == '0':
                 self.__write_page()
             elif self.__current_mode == '1':
                 try:
                     self.__write_page(mode='write_latest')
-                except ObjAlreadyExists:
+                except exceptions.ObjAlreadyExists:
                     break
             else:
                 raise Exception('Unexpected error.')
@@ -169,23 +171,23 @@ class LocalStorage:
     def __create_tree(self):
         sub_folders = set()
         for item in self.__download_selection:
-            year = datetime.datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
+            year = datetime.strptime(item[3], "%Y-%m-%dT%H:%M:%SZ").year
             sub_folders.add(str(year))
         for item in sub_folders:
-            if not os.path.exists(PATH_TO_IMAGES_STORAGE + item):
+            if not os.path.exists(config.PATH_TO_IMAGES_STORAGE + item):
                 try:
-                    os.makedirs(PATH_TO_IMAGES_STORAGE + item)
+                    os.makedirs(config.PATH_TO_IMAGES_STORAGE + item)
                 except OSError as err:
                     self.__logger.error(f"Fail to create folder, {err}")
                     raise
-                self.__logger.info(f"Folder {PATH_TO_IMAGES_STORAGE + item} has been created.")
-            if not os.path.exists(PATH_TO_VIDEOS_STORAGE + item):
+                self.__logger.info(f"Folder {config.PATH_TO_IMAGES_STORAGE + item} has been created.")
+            if not os.path.exists(config.PATH_TO_VIDEOS_STORAGE + item):
                 try:
-                    os.makedirs(PATH_TO_VIDEOS_STORAGE + item)
+                    os.makedirs(config.PATH_TO_VIDEOS_STORAGE + item)
                 except OSError as err:
                     self.__logger.error(f"Fail to create folder, {err}")
                     raise
-                self.__logger.info(f"Folder {PATH_TO_VIDEOS_STORAGE + item} has been created.")
+                self.__logger.info(f"Folder {config.PATH_TO_VIDEOS_STORAGE + item} has been created.")
 
     def __get_actualization_selection(self, limit=5, start_from=None):  # TODO
         cursor = self.__db_conn.cursor()
@@ -214,16 +216,16 @@ class LocalStorage:
         self.__get_last_actualization()
         if not self.__last_actualization_date:
             return True
-        difference = datetime.datetime.now() - \
-            datetime.datetime.strptime(self.__last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
+        difference = datetime.now() - \
+            datetime.strptime(self.__last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
         difference = difference.days
-        if difference < ACTUALIZATION_PERIOD:
+        if difference < config.ACTUALIZATION_PERIOD:
             return False
         return True
 
     def __set_last_actualization_date(self):
         cursor = self.__db_conn.cursor()
-        now = datetime.datetime.today().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.today().strftime("%Y-%m-%dT%H:%M:%SZ")
         cursor.execute(f"INSERT OR REPLACE INTO account_info (key, value) VALUES ('last_actualization', '{now}')")
         self.__db_conn.commit()
 
@@ -236,7 +238,7 @@ class LocalStorage:
     def remove_not_existing(self, auth) -> bool:  # TODO: use batchGet
         self.__get_actualization_selection()
         for item in self.__actualization_selection:
-            media_item = MediaItem(*item, self.__db_conn)
+            media_item = media.Item(*item, self.__db_conn)
             try:
                 result = media_item.is_exist_on_server(auth)
             except (Exception, KeyboardInterrupt):
@@ -258,20 +260,21 @@ class LocalStorage:
             self.__logger.error("Please check storage paths in config.")
             raise
         for item in self.__download_selection:
-            media_item = MediaItem(*item, self.__db_conn)
+            media_item = media.Item(*item, self.__db_conn,
+                                    config.PATH_TO_VIDEOS_STORAGE, config.PATH_TO_IMAGES_STORAGE)
             try:
                 media_item.get_base_url(auth)
             except FileNotFoundError:
                 self.__logger.warning(f"Item {item[2]} not found on the server, removing from database.")
                 media_item.remove_from_db()
                 continue
-            except VideoNotReady:
+            except exceptions.VideoNotReady:
                 continue
             try:
                 media_item.download()
             except (FileExistsError, OSError):
                 continue
-            except DownloadError:
+            except exceptions.DownloadError:
                 sleep(30)
         self.__logger.info('Getting media items is complete.')
 
@@ -281,14 +284,14 @@ class Main:
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.__is_db_exists():
             self.__db_creation()
-        self.db_conn = db_connect(DB_FILE_PATH)
+        self.db_conn = helpers.db_connect(config.DB_FILE_PATH)
         self.authentication = Authentication()
         self.metadata = MetadataList(self.db_conn)
         self.local_storage = LocalStorage(self.db_conn)
 
     def __is_db_exists(self) -> bool:
-        if not os.path.exists(DB_FILE_PATH):
-            message = f'DB {DB_FILE_PATH} does not exist.'
+        if not os.path.exists(config.DB_FILE_PATH):
+            message = f'DB {config.DB_FILE_PATH} does not exist.'
             print(message)
             self.logger.error(message)
             return False
@@ -300,7 +303,7 @@ class Main:
             self.logger.warning('Aborted by user.')
             exit(3)
         try:
-            shutil.copy('../db/db.sqlite.structure', DB_FILE_PATH)
+            shutil.copy('../db/db.sqlite.structure', config.DB_FILE_PATH)
         except OSError as err:
             message = f'Fail to create DB.\n{err}'
             print(message)
@@ -333,9 +336,3 @@ class Main:
         finally:
             self.db_conn.close()
         self.logger.info('Finished.')
-
-
-if __name__ == '__main__':
-    while True:
-        Main().main()
-        sleep(300)

@@ -1,13 +1,17 @@
 import os
-import datetime
+import logging
+import sqlite3
+import requests
 
-from .helpers import *
-from .exceptions import *
+from app.tools import helpers
+from app.tools import exceptions
+from datetime import datetime
+
 
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 
 
-class MediaItem:
+class Item:
     def __init__(self, item_id, mime_type, filename, creation_time, db_conn, path_to_videos_storage,
                  path_to_images_storage):
         self.id = item_id
@@ -17,7 +21,7 @@ class MediaItem:
         self.mime_type = mime_type
         self.filename = filename
         self.creation_time = creation_time
-        creation_year: int = datetime.datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
+        creation_year: int = datetime.strptime(self.creation_time, "%Y-%m-%dT%H:%M:%SZ").year
         self.sub_folder_name = str(creation_year) + '/'
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.__db_conn = db_conn
@@ -31,7 +35,7 @@ class MediaItem:
                            'VALUES (?, ?, ?, ?)', values)
             self.__db_conn.commit()
         except sqlite3.IntegrityError:
-            raise ObjAlreadyExists(f'Media item {self.filename} already in the DB.')
+            raise exceptions.ObjAlreadyExists(f'Media item {self.filename} already in the DB.')
         except sqlite3.Error as err:
             self.__logger.error(f'Fail to write {self.filename} metadata into the DB.\n{err}')
 
@@ -46,7 +50,7 @@ class MediaItem:
     def get_base_url(self, auth):
         url = SRV_ENDPOINT + 'mediaItems/' + self.id
         try:
-            representation = make_request_w_auth(auth.access_token, url)
+            representation = helpers.make_request_w_auth(auth.access_token, url)
         except FileNotFoundError:
             self.__logger.warning(f'Item {self.id} not found on the server.')
             raise
@@ -57,7 +61,7 @@ class MediaItem:
                 self.__logger.error(f'Response does not contain video status. Response: {representation}')
                 raise
             if self.video_status != 'READY':
-                raise VideoNotReady(f'Video {self.filename} is not ready.')
+                raise exceptions.VideoNotReady(f'Video {self.filename} is not ready.')
         try:
             self.base_url = representation['baseUrl']
         except KeyError:
@@ -76,8 +80,8 @@ class MediaItem:
             raise Exception('Unexpected mime type.')
         response = requests.get(self.base_url + url_suffix, params=None, headers=None, stream=True)
         if 'text/html' in response.headers['Content-Type']:
-            raise DownloadError(f"Fail to download {self.filename}. "
-                                f"Server returns: {response.text}, http code {response.status_code}")
+            raise exceptions.DownloadError(f"Fail to download {self.filename}. "
+                                           f"Server returns: {response.text}, http code {response.status_code}")
         elif 'image' in response.headers['Content-Type'] or 'video' in response.headers['Content-Type']:
             if os.path.exists(path_to_object):
                 self.__logger.warning(f"File {self.filename} already exist in local storage! Setting 'stored = 2' "
@@ -113,7 +117,7 @@ class MediaItem:
     def is_exist_on_server(self, auth) -> bool:
         url = SRV_ENDPOINT + 'mediaItems/' + self.id
         try:
-            make_request_w_auth(auth.access_token, url)
+            helpers.make_request_w_auth(auth.access_token, url)
         except FileNotFoundError:
             self.__logger.warning(f"Item {self.id} not found on the server.")
             return False

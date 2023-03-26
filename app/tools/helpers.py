@@ -1,7 +1,8 @@
 import sqlite3
 import requests
+import logging
 
-from .exceptions import *
+from app.tools import exceptions
 
 
 def db_connect(db_file_path) -> sqlite3.Connection:
@@ -21,11 +22,11 @@ def make_request_w_auth(access_token, url, params=None):
                'Authorization': 'Bearer ' + access_token}
     response = requests.get(url, headers=headers, params=params)
     if response.status_code == 401:
-        raise SessionNotAuth('Session unauthorized.')
+        raise exceptions.SessionNotAuth('Session unauthorized.')
     elif response.status_code == 404:
         raise FileNotFoundError()
     elif response.status_code != 200:
-        raise MyGPhotoException(f'Response code: {response.status_code}. Response: {response.text}')
+        raise exceptions.MyGPhotoException(f'Response code: {response.status_code}. Response: {response.text}')
     try:
         representation = response.json()
     except ValueError:
