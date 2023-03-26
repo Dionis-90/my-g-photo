@@ -234,7 +234,7 @@ class LocalStorage:
     def remove_not_existing(self, auth) -> bool:  # TODO: use batchGet
         self.__get_actualization_selection()
         for item in self.__actualization_selection:
-            media_item = media.Item(*item, self.__db_conn)
+            media_item = media.Item(*item, self.__db_conn, config.PATH_TO_VIDEOS_STORAGE, config.PATH_TO_IMAGES_STORAGE)
             try:
                 result = media_item.is_exist_on_server(auth)
             except (Exception, KeyboardInterrupt):
