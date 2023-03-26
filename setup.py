@@ -9,7 +9,7 @@ setup(
     url='https://github.com:Dionis-90/my-g-photo',
     keywords='GooglePhoto',
     python_requires='>=3.6',
-    packages=find_packages(include=['app.*', ]),
+    packages=find_packages(include=['app', 'app.*', 'config']),
     install_requires=[
         'google_auth_oauthlib',
         'google-auth',

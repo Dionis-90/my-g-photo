@@ -276,7 +276,7 @@ class Main:
         self.logger = logging.getLogger(self.__class__.__name__)
         if not self.__is_db_exists():
             self.__db_creation()
-        self.db_conn = db_connect()
+        self.db_conn = db_connect(DB_FILE_PATH)
         self.authentication = Authentication()
         self.metadata = MetadataList(self.db_conn)
         self.local_storage = LocalStorage(self.db_conn)

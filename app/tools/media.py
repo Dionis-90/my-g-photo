@@ -3,6 +3,7 @@ import datetime
 
 from .helpers import *
 from .exceptions import *
+from app.config.config import *
 
 SRV_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/'
 

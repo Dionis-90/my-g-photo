@@ -1,16 +1,15 @@
 import sqlite3
 import requests
 
-from config.config import *
 from .exceptions import *
 
 
-def db_connect() -> sqlite3.Connection:
+def db_connect(db_file_path) -> sqlite3.Connection:
     db_logger = logging.getLogger('DB connection')
     try:
-        db_conn = sqlite3.connect(DB_FILE_PATH)
+        db_conn = sqlite3.connect(db_file_path)
     except Exception as err:
-        message = f'Fail to connect to DB {DB_FILE_PATH}.\n{err}'
+        message = f'Fail to connect to DB {db_file_path}.\n{err}'
         print(message)
         db_logger.error(message)
         exit(10)

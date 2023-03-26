@@ -4,5 +4,5 @@ venv
 *.sqlite
 media/*
 __*__
-config/config.py
+app/config/config.py
 identity/token.json
