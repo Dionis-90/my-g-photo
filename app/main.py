@@ -3,7 +3,7 @@ import logging
 import os
 import sqlite3
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.tools import media, exceptions, helpers
 from app.config import config
 from google.auth.transport.requests import Request
@@ -189,19 +189,20 @@ class LocalStorage:
         cursor = self.__db_conn.cursor()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_processed_object_id'")
         last_local_id_processed = cursor.fetchall()
+        cursor.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
+        self.__db_conn.commit()
+        not_before = datetime.now() - timedelta(days=config.ACTUALIZATION_NOT_OLD)
         if not last_local_id_processed:
-            cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media "
-                           "WHERE stored != '0' ORDER BY id")
+            cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE stored != '0' \
+                           and creation_time > ? ORDER BY id;", (not_before.strftime("%Y-%m-%d"),))
         else:
-            cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE \
-                                   stored != '0' and id > (SELECT id FROM my_media WHERE object_id = ?) ORDER BY id",
-                           last_local_id_processed[0])
+            cursor.execute("SELECT object_id, media_type, filename, creation_time FROM my_media WHERE stored != '0' and\
+                           id > (SELECT id FROM my_media WHERE object_id = ?) and creation_time > ? ORDER BY id",
+                           (last_local_id_processed[0][0], not_before.strftime("%Y-%m-%d")))
         self.__actualization_selection = cursor.fetchall()
 
     def __get_last_actualization(self):
         cursor = self.__db_conn.cursor()
-        cursor.execute("DELETE from account_info WHERE key = 'last_processed_object_id'")
-        self.__db_conn.commit()
         cursor.execute("SELECT value FROM account_info WHERE key = 'last_actualization'")
         try:
             self.__last_actualization_date = cursor.fetchone()[0]
@@ -215,7 +216,7 @@ class LocalStorage:
         difference = datetime.now() - \
             datetime.strptime(self.__last_actualization_date, "%Y-%m-%dT%H:%M:%SZ")
         difference = difference.days
-        if difference < config.ACTUALIZATION_PERIOD:
+        if difference < config.ACTUALIZATION_RUN_PERIOD:
             return False
         return True
 

@@ -17,6 +17,13 @@ def db_connect(db_file_path) -> sqlite3.Connection:
     return db_conn
 
 
+def db_conn_pool(db_file_path, count=1) -> list:
+    db_conn = []
+    for _ in range(count):
+        db_conn += db_connect(db_file_path)
+    return db_conn
+
+
 def make_request_w_auth(access_token, url, params=None):
     headers = {'Accept': 'application/json',
                'Authorization': 'Bearer ' + access_token}
