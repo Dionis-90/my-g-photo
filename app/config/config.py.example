@@ -1,8 +1,8 @@
-ACCESS_TOKEN_FILE = 'token.json'
-IDENTITY_FILE_PATH = 'client_id.json'
-DB_FILE_PATH = 'db.sqlite'
+ACCESS_TOKEN_FILE = 'identity/token.json'
+IDENTITY_FILE_PATH = 'identity/client_id.json'
+DB_FILE_PATH = 'db/db.sqlite'
 PATH_TO_IMAGES_STORAGE = 'media/'
 PATH_TO_VIDEOS_STORAGE = 'media/'
-LOG_FILE_PATH = 'working.log'
+LOG_FILE_PATH = 'log/working.log'
 ACTUALIZATION_RUN_PERIOD = 7  # Run Every N Days
 ACTUALIZATION_NOT_OLD = 360  # Days
